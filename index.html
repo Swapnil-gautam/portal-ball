@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Portal Ball · Spike 0</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400..700&display=swap"
+    />
+  </head>
+  <body>
+    <main id="stage">
+      <canvas id="canvas" width="1280" height="720"></canvas>
+      <div id="curtain">
+        <div class="curtain-inner">
+          <p class="eyebrow">Portal Ball · Spike 0</p>
+          <h1>Latency floor &amp; tracking feasibility</h1>
+          <p class="lede">
+            Three tests: watch the tracking, measure true end-to-end lag with a 240&nbsp;fps
+            camera, and find out whether a person can actually intercept a target on a
+            fixed clock.
+          </p>
+          <button id="start" class="primary">Enable camera</button>
+          <p id="status" class="status">Camera stays on this machine. Nothing is uploaded.</p>
+        </div>
+      </div>
+    </main>
+
+    <aside id="panel">
+      <header>
+        <p class="eyebrow">Spike 0</p>
+        <h2>Instrument panel</h2>
+      </header>
+
+      <nav id="tabs" role="tablist"></nav>
+      <p id="blurb" class="blurb"></p>
+
+      <section>
+        <h3>Pipeline</h3>
+        <dl id="pipeline" class="stats"></dl>
+        <p class="foot">
+          Capture and display latency are largely invisible from inside the browser. The
+          subtotal is a floor, not the answer &mdash; use the latency probe for the real number.
+        </p>
+      </section>
+
+      <section>
+        <h3 id="mode-stats-title">Mode</h3>
+        <dl id="mode-stats" class="stats"></dl>
+      </section>
+
+      <section>
+        <h3>One-Euro filter</h3>
+        <label class="ctl">
+          <span>min cutoff <b id="v-mincutoff"></b> Hz</span>
+          <input id="mincutoff" type="range" min="0.2" max="6" step="0.05" />
+        </label>
+        <label class="ctl">
+          <span>beta <b id="v-beta"></b></span>
+          <input id="beta" type="range" min="0" max="0.2" step="0.001" />
+        </label>
+        <p class="foot">
+          Lower cutoff is smoother and laggier. Raise beta to open the cutoff up as the
+          hand speeds up &mdash; that is what keeps a swing responsive without jitter at rest.
+        </p>
+      </section>
+
+      <section data-mode="latency">
+        <h3>Probe</h3>
+        <label class="ctl">
+          <span>trigger line <b id="v-liney"></b></span>
+          <input id="liney" type="range" min="0.15" max="0.8" step="0.01" />
+        </label>
+        <p class="foot">
+          Mark a physical reference in the camera's view at the height that trips the line.
+          Film your hand and the screen together, then count video frames from the physical
+          crossing to the flash. At 240&nbsp;fps each frame is 4.17&nbsp;ms.
+        </p>
+      </section>
+
+      <section data-mode="intercept">
+        <h3>Intercept</h3>
+        <label class="ctl">
+          <span>flight time <b id="v-flight"></b> ms</span>
+          <input id="flight" type="range" min="500" max="2000" step="50" />
+        </label>
+        <label class="ctl">
+          <span>hit radius <b id="v-radius"></b> w</span>
+          <input id="radius" type="range" min="0.03" max="0.15" step="0.005" />
+        </label>
+      </section>
+
+      <div class="actions">
+        <button id="reset">Reset run</button>
+        <button id="copy">Copy CSV</button>
+      </div>
+      <p id="toast" class="toast" hidden></p>
+    </aside>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

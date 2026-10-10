@@ -1,0 +1,25 @@
+{
+  "name": "portal-ball",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Spike 0 - latency floor and tracking feasibility harness for Portal Ball",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "setup:wasm": "node scripts/copy-wasm.mjs",
+    "setup:model": "node scripts/fetch-model.mjs",
+    "setup": "npm run setup:wasm && npm run setup:model",
+    "postinstall": "npm run setup"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1",
+    "three": "^0.186.0"
+  }
+}

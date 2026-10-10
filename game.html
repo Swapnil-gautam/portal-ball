@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Portal Ball</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400..700&display=swap"
+    />
+    <style>
+      :root {
+        --ground: #0c1113;
+        --surface: #141b1e;
+        --surface-2: #1d2629;
+        --ink: #e8eeee;
+        --ink-2: #b4c2c4;
+        --muted: #7d8f95;
+        --rule: #283336;
+        --rule-strong: #3a484c;
+        --cyan: #4cbecb;
+        --amber: #ffa85c;
+        --warn: #e4705c;
+        --ok: #6fbe8c;
+        color-scheme: dark;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: var(--ground);
+        color: var(--ink);
+        font-family: "JetBrains Mono", monospace;
+        overflow: hidden;
+      }
+
+      #stage {
+        position: relative;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #07090a;
+      }
+
+      #viewport {
+        position: relative;
+        width: 100%;
+        max-width: min(100%, calc(100vh * 16 / 9));
+        aspect-ratio: 16 / 9;
+        background: var(--ground);
+        overflow: hidden;
+      }
+
+      #bg-video, #canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      #bg-video { display: none; }
+      #bg-video.visible { display: block; }
+      #canvas { z-index: 1; }
+
+      /* -------------------------------------------------------- HUD */
+
+      #hud {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        pointer-events: none;
+        font-family: "Archivo", sans-serif;
+      }
+
+      .score {
+        position: absolute;
+        left: 0;
+        right: 0;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+      }
+      .score.opp { top: 3%; }
+      .score.you { bottom: 3%; }
+      .score b {
+        font-variation-settings: "wdth" 108, "wght" 760;
+        font-size: clamp(28px, 5vw, 44px);
+        line-height: 1;
+        color: var(--ink);
+        text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+      }
+      .score span {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10.5px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--ink-2);
+        text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+      }
+      .score .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--cyan);
+        margin-top: 2px;
+        display: none;
+      }
+      .score.serving .dot { display: block; }
+
+      #serve-banner {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+      }
+      #serve-banner[hidden] { display: none; }
+      #serve-banner p {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 13px;
+        color: var(--ink-2);
+        margin: 0 0 10px;
+        text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+      }
+      .progress {
+        width: 160px;
+        height: 5px;
+        background: rgba(255, 255, 255, 0.12);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      #serve-progress {
+        height: 100%;
+        width: 0%;
+        background: var(--cyan);
+        transition: width 0.05s linear;
+      }
+
+      #point-flash {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        transition: opacity 0.08s linear;
+      }
+      #point-flash.you { background: linear-gradient(to top, rgba(111, 190, 140, 0.28), transparent 30%); }
+      #point-flash.opp { background: linear-gradient(to bottom, rgba(228, 112, 92, 0.28), transparent 30%); }
+      #point-flash.show { opacity: 1; }
+
+      #end-screen {
+        position: absolute;
+        inset: 0;
+        background: rgba(7, 9, 10, 0.82);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        pointer-events: auto;
+      }
+      #end-screen[hidden] { display: none; }
+      #end-screen h2 {
+        font-variation-settings: "wdth" 110, "wght" 760;
+        font-size: clamp(30px, 6vw, 48px);
+        margin: 0 0 10px;
+      }
+      #end-screen h2.win { color: var(--ok); }
+      #end-screen h2.lose { color: var(--warn); }
+      #end-screen p {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 13px;
+        color: var(--muted);
+        margin: 0;
+      }
+
+      #debug {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        padding: 8px 10px;
+        background: rgba(7, 9, 10, 0.75);
+        border: 1px solid var(--rule-strong);
+        border-radius: 6px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11.5px;
+        line-height: 1.6;
+        color: var(--ink-2);
+        white-space: pre;
+      }
+      #debug[hidden] { display: none; }
+
+      #tab-warning {
+        position: absolute;
+        top: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 5;
+        max-width: min(560px, 90%);
+        padding: 9px 14px;
+        background: rgba(228, 112, 92, 0.92);
+        color: #1f0b07;
+        border-radius: 8px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        text-align: center;
+      }
+      #tab-warning[hidden] { display: none; }
+
+      /* -------------------------------------------------------- paddle lab */
+
+      #viewport.lab .score,
+      #viewport.lab #serve-banner { display: none; }
+
+      #lab-panel {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        bottom: 12px;
+        width: min(310px, 36%);
+        z-index: 3;
+        overflow-y: auto;
+        padding: 14px 14px 12px;
+        background: rgba(12, 17, 19, 0.88);
+        border: 1px solid var(--rule-strong);
+        border-radius: 10px;
+        font-family: "JetBrains Mono", monospace;
+        color: var(--ink-2);
+        backdrop-filter: blur(4px);
+      }
+      #lab-panel[hidden] { display: none; }
+      #lab-panel header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+      .lab-eyebrow {
+        font-family: "Archivo", sans-serif;
+        font-variation-settings: "wdth" 96, "wght" 640;
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--cyan);
+        margin: 0;
+      }
+      .lab-hits { margin: 0; font-size: 12px; color: var(--amber); }
+      .lab-readout {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 2px 10px;
+        margin: 0 0 12px;
+        padding: 8px 10px;
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 6px;
+        font-size: 11px;
+      }
+      .lab-readout dt { color: var(--muted); }
+      .lab-readout dd { margin: 0; text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+      .lab-group {
+        font-family: "Archivo", sans-serif;
+        font-size: 10.5px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 14px 0 6px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid var(--rule);
+      }
+      .lab-row { margin-bottom: 10px; }
+      .lab-row-top { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; }
+      .lab-row-top b { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+      .lab-row-top button {
+        all: unset;
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 10.5px;
+        margin-left: 6px;
+      }
+      .lab-row-top button:hover { color: var(--cyan); }
+      .lab-row input[type="range"] { width: 100%; margin: 4px 0 0; }
+      .lab-row p { margin: 2px 0 0; font-size: 10.5px; line-height: 1.45; color: var(--muted); }
+      .lab-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; }
+      .lab-actions button { margin: 0; }
+      .lab-foot { font-size: 10.5px; margin: 8px 0 0; line-height: 1.5; }
+
+      /* -------------------------------------------------------- self view */
+
+      #self-view {
+        position: absolute;
+        right: 3%;
+        bottom: 3%;
+        width: 18%;
+        aspect-ratio: 4 / 3;
+        border: 1px solid var(--rule-strong);
+        border-radius: 8px;
+        overflow: hidden;
+        background: #050707;
+        z-index: 3;
+      }
+      #self-canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      /* -------------------------------------------------------- curtain / menu */
+
+      #curtain {
+        position: absolute;
+        inset: 0;
+        background: var(--ground);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 32px 24px;
+        overflow-y: auto;
+        z-index: 4;
+      }
+      #curtain[hidden] { display: none; }
+      .panel { max-width: 480px; width: 100%; text-align: center; }
+
+      .eyebrow {
+        font-family: "Archivo", sans-serif;
+        font-variation-settings: "wdth" 96, "wght" 620;
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--cyan);
+        margin: 0 0 14px;
+      }
+      h1 {
+        font-family: "Archivo", sans-serif;
+        font-variation-settings: "wdth" 116, "wght" 780;
+        font-size: clamp(30px, 6vw, 46px);
+        margin: 0 0 16px;
+        letter-spacing: -0.02em;
+      }
+      h2 {
+        font-family: "Archivo", sans-serif;
+        font-variation-settings: "wdth" 108, "wght" 700;
+        font-size: 20px;
+        margin: 0 0 12px;
+      }
+      p { font-size: 13.5px; line-height: 1.6; color: var(--muted); margin: 0 0 16px; }
+      .step {
+        text-align: left;
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 14px;
+      }
+      .step-label {
+        font-family: "Archivo", sans-serif;
+        font-size: 10.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--cyan);
+        margin: 0 0 8px;
+      }
+      textarea, input[type="text"] {
+        width: 100%;
+        padding: 10px 12px;
+        font-size: 12.5px;
+        background: var(--surface-2);
+        color: var(--ink);
+        border: 1px solid var(--rule-strong);
+        border-radius: 6px;
+        font-family: "JetBrains Mono", monospace;
+        resize: none;
+      }
+      textarea { height: 64px; }
+
+      button {
+        font-family: "Archivo", sans-serif;
+        font-size: 13.5px;
+        font-weight: 600;
+        padding: 11px 20px;
+        margin: 4px;
+        background: var(--amber);
+        color: #1f1508;
+        border: 0;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      button:hover { background: #ffb977; }
+      button:disabled { background: var(--rule-strong); color: var(--muted); cursor: default; }
+      button.ghost {
+        background: transparent;
+        color: var(--ink-2);
+        border: 1px solid var(--rule-strong);
+      }
+      button.ghost:hover { color: var(--ink); border-color: var(--muted); }
+      button.small { font-size: 11.5px; padding: 7px 12px; }
+      .row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 8px; }
+
+      .choice-grid { display: grid; gap: 10px; margin-top: 8px; }
+      .choice {
+        display: block;
+        width: 100%;
+        text-align: left;
+        background: var(--surface);
+        border: 1px solid var(--rule-strong);
+        border-radius: 8px;
+        padding: 16px;
+        color: var(--ink);
+        cursor: pointer;
+      }
+      .choice:hover { border-color: var(--cyan); }
+      .choice b { font-family: "Archivo", sans-serif; display: block; margin-bottom: 4px; }
+      .choice span { font-size: 12px; color: var(--muted); }
+
+      label.slider { display: block; text-align: left; margin-bottom: 18px; }
+      label.slider span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+      input[type="range"] { width: 100%; accent-color: var(--cyan); }
+
+      .status-line {
+        font-size: 12px;
+        color: var(--muted);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 4px;
+      }
+      .dot-status {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: var(--muted);
+      }
+      .dot-status.pulse { background: var(--cyan); animation: pulse 1.2s infinite; }
+      .dot-status.ok { background: var(--ok); }
+      .dot-status.bad { background: var(--warn); }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+      #err { color: var(--warn); font-size: 12px; margin-top: 10px; min-height: 1em; }
+      [data-view] { display: none; }
+      [data-view].active { display: block; }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <div id="viewport">
+        <video id="bg-video" autoplay playsinline></video>
+        <canvas id="canvas"></canvas>
+
+        <div id="hud">
+          <div class="score opp" id="score-opp-row">
+            <b id="score-opp">0</b>
+            <span>opponent</span>
+            <span class="dot"></span>
+          </div>
+          <div class="score you" id="score-you-row">
+            <span class="dot"></span>
+            <span>you</span>
+            <b id="score-you">0</b>
+          </div>
+
+          <div id="serve-banner" hidden>
+            <p id="serve-text">Hold still to serve</p>
+            <div class="progress"><div id="serve-progress"></div></div>
+          </div>
+
+          <div id="point-flash"></div>
+
+          <div id="debug" hidden></div>
+
+          <div id="end-screen" hidden>
+            <h2 id="end-title"></h2>
+            <p>press enter to play again · esc for menu</p>
+          </div>
+        </div>
+
+        <div id="tab-warning" role="alert" hidden>
+          Portal Ball is also running in another tab. Close the other tab — both are using the camera and slowing each other down.
+        </div>
+
+        <aside id="lab-panel" hidden>
+          <header>
+            <p class="lab-eyebrow">Paddle lab</p>
+            <p class="lab-hits" id="lab-hits">hits 0 / 0</p>
+          </header>
+          <dl class="lab-readout" id="lab-readout"></dl>
+          <div id="lab-sliders"></div>
+          <div class="lab-actions">
+            <button type="button" class="small" id="lab-feed">Pause balls</button>
+            <button type="button" class="small ghost" id="lab-copy">Copy settings</button>
+            <button type="button" class="small ghost" id="lab-reset">Reset all</button>
+          </div>
+          <p class="lab-foot" id="lab-status">Changes save automatically and carry into the game. Esc to leave.</p>
+        </aside>
+
+        <div id="self-view">
+          <canvas id="self-canvas"></canvas>
+        </div>
+      </div>
+
+      <div id="curtain">
+        <div class="panel">
+
+          <div data-view="landing" class="active">
+            <p class="eyebrow">Portal Ball</p>
+            <h1>Who are you playing?</h1>
+            <p>Solo practice against a bot, or a real match against another person over the internet.</p>
+            <div class="choice-grid">
+              <button class="choice" id="pick-ai" type="button">
+                <b>Practice vs AI</b>
+                <span>One camera, one player. Good for testing your swing and the hit timing.</span>
+              </button>
+              <button class="choice" id="pick-friend" type="button">
+                <b>Play a friend, anywhere</b>
+                <span>Two cameras, two machines, real video between you — this is the actual game.</span>
+              </button>
+              <button class="choice" id="pick-lab" type="button">
+                <b>Paddle lab</b>
+                <span>Tune how the paddle follows your hand. No opponent — a ball machine feeds you. Settings carry into the game.</span>
+              </button>
+            </div>
+          </div>
+
+          <div data-view="ai-setup">
+            <p class="eyebrow">Practice vs AI</p>
+            <h2>Set the difficulty</h2>
+            <label class="slider">
+              <span>Bot skill: <b id="diff-readout">50%</b></span>
+              <input type="range" id="diff-slider" min="0" max="100" value="50" step="5" />
+            </label>
+            <div class="row">
+              <button id="ai-start">Start</button>
+              <button class="ghost" id="ai-back">Back</button>
+            </div>
+          </div>
+
+          <div data-view="friend-choice">
+            <p class="eyebrow">Play a friend</p>
+            <h2>Host or join?</h2>
+            <p>Whoever clicks Host generates a code. Send it to your friend any way you like — text, WhatsApp, whatever. They paste it in and send one back. One exchange, then you're connected directly.</p>
+            <div class="row">
+              <button id="pick-host">Host a game</button>
+              <button id="pick-join">Join a game</button>
+            </div>
+            <div class="row"><button class="ghost" id="friend-back">Back</button></div>
+          </div>
+
+          <div data-view="loading-cam">
+            <p class="eyebrow">One moment</p>
+            <h2 id="loading-title">Setting up your camera</h2>
+            <p id="loading-detail">Loading the hand tracker…</p>
+            <div class="status-line"><span class="dot-status pulse"></span><span id="loading-status">Working</span></div>
+          </div>
+
+          <div data-view="host-wait">
+            <p class="eyebrow">Hosting</p>
+            <div class="step">
+              <p class="step-label">Step 1 — send this to your friend</p>
+              <textarea id="host-code" readonly></textarea>
+              <div class="row"><button class="small" id="host-copy">Copy code</button></div>
+            </div>
+            <div class="step">
+              <p class="step-label">Step 2 — paste what they send back</p>
+              <textarea id="host-answer" placeholder="Paste their reply code here"></textarea>
+              <div class="row"><button class="small" id="host-connect">Connect</button></div>
+            </div>
+            <div class="status-line"><span class="dot-status" id="host-dot"></span><span id="host-status">Waiting for their reply</span></div>
+            <div class="row"><button class="ghost" id="host-back">Cancel</button></div>
+          </div>
+
+          <div data-view="join-enter">
+            <p class="eyebrow">Joining</p>
+            <div class="step">
+              <p class="step-label">Paste the code your friend sent you</p>
+              <textarea id="join-code" placeholder="Paste their code here"></textarea>
+              <div class="row"><button id="join-continue">Continue</button></div>
+            </div>
+            <div class="row"><button class="ghost" id="join-back">Cancel</button></div>
+          </div>
+
+          <div data-view="join-wait">
+            <p class="eyebrow">Joining</p>
+            <div class="step">
+              <p class="step-label">Send this back to them</p>
+              <textarea id="join-answer" readonly></textarea>
+              <div class="row"><button class="small" id="join-copy">Copy code</button></div>
+            </div>
+            <div class="status-line"><span class="dot-status pulse" id="join-dot"></span><span id="join-status">Waiting for connection</span></div>
+            <div class="row"><button class="ghost" id="join-back2">Cancel</button></div>
+          </div>
+
+          <p id="err"></p>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/game/main.ts"></script>
+  </body>
+</html>
