@@ -1,4 +1,17 @@
 import type { GameEvent } from "./gamestate";
+import type { PaddleAxes } from "./paddleOrientation";
+
+/**
+ * A player's paddle as they see it on their own screen — position on their
+ * strike plane and its axes, in their own court coordinates (to themselves
+ * they're always the near side). The receiver mirrors it onto the far end.
+ */
+export interface PaddleState {
+  visible: boolean;
+  x: number;
+  y: number;
+  axes: PaddleAxes | null;
+}
 
 /**
  * Real WebRTC between two machines — this is what makes long-distance play
@@ -39,6 +52,9 @@ const ICE_SERVERS: RTCIceServer[] = [
 
 type WireMessage =
   | { type: "event"; event: GameEvent }
+  // Sent ~30×/s so each player can see the other's paddle. Purely visual:
+  // hits are still decided by each player's own machine.
+  | { type: "paddle"; p: PaddleState }
   // Round-trip probe. Both timestamps are the *sender's* clock, so the RTT is
   // computed on one machine — never compare performance.now() across machines.
   | { type: "ping"; t: number }
@@ -73,6 +89,7 @@ export class RTCGamePeer {
 
   onRemoteStream: ((stream: MediaStream) => void) | null = null;
   onEvent: ((e: GameEvent) => void) | null = null;
+  onPaddle: ((p: PaddleState) => void) | null = null;
   onStatus: ((status: PeerStatus) => void) | null = null;
 
   constructor(localStream: MediaStream) {
@@ -122,6 +139,7 @@ export class RTCGamePeer {
       try {
         const msg = JSON.parse(e.data) as WireMessage;
         if (msg.type === "event") this.onEvent?.(msg.event);
+        else if (msg.type === "paddle") this.onPaddle?.(msg.p);
         else if (msg.type === "ping") this.sendRaw({ type: "pong", t: msg.t });
         else if (msg.type === "pong") {
           const rtt = performance.now() - msg.t;
@@ -183,6 +201,16 @@ export class RTCGamePeer {
 
   send(event: GameEvent): void {
     this.sendRaw({ type: "event", event });
+  }
+
+  sendPaddle(p: PaddleState): void {
+    // Rounded: millimetre precision is plenty, and it keeps each message small.
+    const r = (v: number) => Math.round(v * 1000) / 1000;
+    const v3 = (v: { x: number; y: number; z: number }) => ({ x: r(v.x), y: r(v.y), z: r(v.z) });
+    this.sendRaw({
+      type: "paddle",
+      p: { visible: p.visible, x: r(p.x), y: r(p.y), axes: p.axes && { x: v3(p.axes.x), y: v3(p.axes.y), z: v3(p.axes.z) } },
+    });
   }
 
   private sendRaw(msg: WireMessage): void {

@@ -46,7 +46,8 @@ export class Scene3D {
   private trailHistory: THREE.Vector3[] = [];
 
   private localPaddle: THREE.Group;
-  private aiMarker: THREE.Group;
+  private opponentPaddle: THREE.Group;
+  private readonly opponentTurn = new THREE.Quaternion();
   private court: THREE.Group;
 
   private readonly ray = new THREE.Vector3();
@@ -102,13 +103,13 @@ export class Scene3D {
     this.localPaddle = this.makePaddle(AMBER);
     this.scene.add(this.localPaddle);
 
-    this.aiMarker = this.makePaddle(CYAN);
-    this.aiMarker.visible = false;
-    this.scene.add(this.aiMarker);
+    this.opponentPaddle = this.makePaddle(CYAN);
+    this.opponentPaddle.visible = false;
+    this.scene.add(this.opponentPaddle);
 
     this.court = this.buildCourt();
     this.scene.add(this.court);
-    this.setMode("ai");
+    this.showCourt();
   }
 
   /**
@@ -194,14 +195,17 @@ export class Scene3D {
     return g;
   }
 
-  /** Transparent backdrop (opponent's real video behind it) vs an opaque court of our own. */
-  setMode(mode: "ai" | "network"): void {
-    const solo = mode === "ai";
-    this.court.visible = solo;
-    this.aiMarker.visible = solo;
-    this.shadow.visible = solo;
-    this.renderer.setClearColor(GROUND, solo ? 1 : 0);
-    this.scene.fog = solo ? new THREE.Fog(GROUND, 9, COURT_LENGTH * 2.2) : null;
+  /**
+   * The same court in every mode — practice, online, and the lab. (Online
+   * play used to drop the court and show the opponent's camera full-screen
+   * behind the ball; now their camera is a corner inset and their paddle is
+   * drawn at the far end, like the AI's.)
+   */
+  private showCourt(): void {
+    this.court.visible = true;
+    this.shadow.visible = true;
+    this.renderer.setClearColor(GROUND, 1);
+    this.scene.fog = new THREE.Fog(GROUND, 9, COURT_LENGTH * 2.2);
   }
 
   resize(width: number, height: number): void {
@@ -284,13 +288,24 @@ export class Scene3D {
     handle.position.y = -(settings.headRadius + HANDLE_LENGTH / 2 - 0.02);
   }
 
-  /** The Paddle lab has no opponent. */
-  showOpponent(visible: boolean): void {
-    this.aiMarker.visible = visible;
-  }
-
-  updateAIMarker(x: number, y: number): void {
-    this.aiMarker.position.set(x, y, STRIKE_Z.remote);
+  /**
+   * The opponent's paddle at the far end — the AI's, or the other player's
+   * as sent over the network (already mirrored into our court). `axes`
+   * null keeps the current orientation; the AI never tilts its paddle.
+   */
+  updateOpponentPaddle(x: number, y: number, axes: PaddleAxes | null, visible: boolean): void {
+    this.opponentPaddle.visible = visible;
+    if (!visible) return;
+    this.opponentPaddle.position.set(x, y, STRIKE_Z.remote);
+    if (axes) {
+      this.basis.makeBasis(
+        new THREE.Vector3(axes.x.x, axes.x.y, axes.x.z),
+        new THREE.Vector3(axes.y.x, axes.y.y, axes.y.z),
+        new THREE.Vector3(axes.z.x, axes.z.y, axes.z.z),
+      );
+      this.opponentTurn.setFromRotationMatrix(this.basis);
+      this.opponentPaddle.quaternion.slerp(this.opponentTurn, RENDER_EASE);
+    }
   }
 
   render(): void {

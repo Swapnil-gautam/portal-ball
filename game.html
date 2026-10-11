@@ -48,21 +48,19 @@
         position: relative;
         width: 100%;
         max-width: min(100%, calc(100vh * 16 / 9));
+        max-width: min(100%, calc(100dvh * 16 / 9));
         aspect-ratio: 16 / 9;
         background: var(--ground);
         overflow: hidden;
       }
 
-      #bg-video, #canvas {
+      #canvas {
         position: absolute;
         inset: 0;
         width: 100%;
         height: 100%;
-        object-fit: cover;
+        z-index: 1;
       }
-      #bg-video { display: none; }
-      #bg-video.visible { display: block; }
-      #canvas { z-index: 1; }
 
       /* -------------------------------------------------------- HUD */
 
@@ -170,15 +168,16 @@
       #end-screen h2.lose { color: var(--warn); }
       #end-screen p {
         font-family: "JetBrains Mono", monospace;
-        font-size: 13px;
+        font-size: 12px;
         color: var(--muted);
-        margin: 0;
+        margin: 10px 0 0;
       }
+      .end-actions { display: flex; gap: 8px; margin-top: 8px; }
 
       #debug {
         position: absolute;
-        top: 12px;
-        left: 12px;
+        top: 52px;
+        right: 12px;
         padding: 8px 10px;
         background: rgba(7, 9, 10, 0.75);
         border: 1px solid var(--rule-strong);
@@ -280,6 +279,76 @@
       .lab-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 12px; }
       .lab-actions button { margin: 0; }
       .lab-foot { font-size: 10.5px; margin: 8px 0 0; line-height: 1.5; }
+
+      /* -------------------------------------------------------- opponent view */
+
+      #opponent-view {
+        position: absolute;
+        left: 3%;
+        top: 3%;
+        width: 18%;
+        aspect-ratio: 4 / 3;
+        border: 1px solid var(--rule-strong);
+        border-radius: 8px;
+        overflow: hidden;
+        background: #050707;
+        z-index: 3;
+      }
+      #opponent-view[hidden] { display: none; }
+      /* Not mirrored: their raw camera already shows them as if facing you. */
+      #opponent-view video { width: 100%; height: 100%; object-fit: cover; display: block; }
+      #opponent-view span {
+        position: absolute;
+        left: 6px;
+        bottom: 4px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-2);
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+      }
+
+      #menu-btn {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        z-index: 3;
+        margin: 0;
+        padding: 7px 12px;
+        font-size: 11.5px;
+        background: rgba(12, 17, 19, 0.75);
+        color: var(--ink-2);
+        border: 1px solid var(--rule-strong);
+      }
+      #menu-btn:hover { color: var(--ink); background: rgba(12, 17, 19, 0.9); }
+      #menu-btn[hidden] { display: none; }
+
+      /* Phones and tablets: the game only works sideways. */
+      #rotate-hint { display: none; }
+      @media (orientation: portrait) and (pointer: coarse) {
+        #rotate-hint {
+          display: flex;
+          position: fixed;
+          inset: 0;
+          z-index: 100;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 14px;
+          padding: 32px;
+          background: var(--ground);
+          text-align: center;
+        }
+        #rotate-hint b {
+          font-family: "Archivo", sans-serif;
+          font-variation-settings: "wdth" 108, "wght" 720;
+          font-size: 22px;
+          color: var(--ink);
+        }
+        #rotate-hint span { font-size: 13px; color: var(--muted); line-height: 1.5; }
+        #rotate-hint svg { width: 64px; height: 64px; }
+      }
 
       /* -------------------------------------------------------- self view */
 
@@ -438,10 +507,26 @@
     </style>
   </head>
   <body>
+    <div id="rotate-hint" role="alert">
+      <svg viewBox="0 0 64 64" fill="none" stroke="#4cbecb" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="20" y="6" width="24" height="40" rx="4" />
+        <path d="M44 54h-8M8 30a22 22 0 0 0 22 22" />
+        <path d="M24 48l6 4-4 6" />
+      </svg>
+      <b>Turn your phone sideways</b>
+      <span>Portal Ball only works in landscape — you need the width to see the court and swing.</span>
+    </div>
+
     <div id="stage">
       <div id="viewport">
-        <video id="bg-video" autoplay playsinline></video>
         <canvas id="canvas"></canvas>
+
+        <div id="opponent-view" hidden>
+          <video id="opponent-video" autoplay playsinline></video>
+          <span>opponent</span>
+        </div>
+
+        <button type="button" id="menu-btn" hidden>Menu</button>
 
         <div id="hud">
           <div class="score opp" id="score-opp-row">
@@ -466,7 +551,11 @@
 
           <div id="end-screen" hidden>
             <h2 id="end-title"></h2>
-            <p>press enter to play again · esc for menu</p>
+            <div class="end-actions">
+              <button type="button" id="end-again">Play again</button>
+              <button type="button" class="ghost" id="end-menu">Menu</button>
+            </div>
+            <p>or press Enter / Esc</p>
           </div>
         </div>
 

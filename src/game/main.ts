@@ -2,7 +2,7 @@ import { clear, drawSkeleton, drawVideo, type Surface } from "../draw";
 import { Tracker } from "../tracker";
 import { AIOpponent } from "./ai";
 import { BallMachine } from "./ballMachine";
-import { BALL_RADIUS } from "./court";
+import { ARRIVAL_HEIGHT, BALL_RADIUS } from "./court";
 import { GameState, type GameEvent, type UiEvent } from "./gamestate";
 import { HandPaddle } from "./handPaddle";
 import { PaddleOrientation } from "./paddleOrientation";
@@ -16,7 +16,7 @@ import {
   setPaddleSetting,
   type PaddleSettings,
 } from "./paddleSettings";
-import { RTCGamePeer } from "./network";
+import { RTCGamePeer, type PaddleState } from "./network";
 import type { Paddle, Side } from "./physics";
 import { Scene3D } from "./scene3d";
 import { announceCamera, otherCameraTabs } from "./tabGuard";
@@ -41,7 +41,9 @@ const viewport = el<HTMLDivElement>("viewport");
 const curtain = el<HTMLDivElement>("curtain");
 const errEl = el<HTMLParagraphElement>("err");
 
-const bgVideo = el<HTMLVideoElement>("bg-video");
+const opponentView = el<HTMLDivElement>("opponent-view");
+const opponentVideo = el<HTMLVideoElement>("opponent-video");
+const menuBtn = el<HTMLButtonElement>("menu-btn");
 const selfView = el<HTMLDivElement>("self-view");
 const selfCanvas = el<HTMLCanvasElement>("self-canvas");
 const selfCtx = selfCanvas.getContext("2d", { alpha: false });
@@ -191,6 +193,7 @@ show("landing");
 el<HTMLButtonElement>("pick-ai").addEventListener("click", () => show("ai-setup"));
 el<HTMLButtonElement>("pick-friend").addEventListener("click", () => show("friend-choice"));
 el<HTMLButtonElement>("pick-lab").addEventListener("click", async () => {
+  goLandscape();
   show("loading-cam");
   try {
     await ensureCamera((msg) => (el<HTMLElement>("loading-status").textContent = msg));
@@ -212,12 +215,12 @@ diffSlider.addEventListener("input", () => {
 });
 
 el<HTMLButtonElement>("ai-start").addEventListener("click", async () => {
+  goLandscape();
   const difficulty = Number(diffSlider.value) / 100;
   show("loading-cam");
   try {
     await ensureCamera((msg) => (el<HTMLElement>("loading-status").textContent = msg));
     mode = "ai";
-    scene.setMode("ai");
     ai = new AIOpponent(difficulty);
     game = new GameState("ai", "local");
     enterGame();
@@ -230,6 +233,7 @@ el<HTMLButtonElement>("ai-start").addEventListener("click", async () => {
 // ---------------------------------------------------------------- friend: host / join
 
 el<HTMLButtonElement>("pick-host").addEventListener("click", async () => {
+  goLandscape();
   show("loading-cam");
   try {
     await ensureCamera((msg) => (el<HTMLElement>("loading-status").textContent = msg));
@@ -284,6 +288,7 @@ el<HTMLButtonElement>("host-back").addEventListener("click", () => {
 el<HTMLButtonElement>("join-continue").addEventListener("click", async () => {
   const code = el<HTMLTextAreaElement>("join-code").value.trim();
   if (!code) return;
+  goLandscape();
 
   show("loading-cam");
   try {
@@ -332,16 +337,19 @@ function setDot(id: string, state: "pulse" | "ok" | "bad"): void {
 
 function wirePeer(p: RTCGamePeer): void {
   p.onRemoteStream = (stream) => {
-    bgVideo.srcObject = stream;
-    bgVideo.play().catch(() => {});
-    bgVideo.classList.add("visible");
+    opponentVideo.srcObject = stream;
+    opponentVideo.play().catch(() => {});
+    opponentView.hidden = false;
+  };
+
+  p.onPaddle = (theirs) => {
+    remotePaddle = mirrorPaddle(theirs);
   };
 
   p.onEvent = (evt: GameEvent) => game?.applyRemoteEvent(evt, p.latencyMs);
 
   p.onStatus = (status) => {
     if (status === "connected" && !playing) {
-      scene.setMode("network");
       game = new GameState("network", firstServer);
       enterGame();
     } else if (status === "failed" || status === "disconnected") {
@@ -367,6 +375,10 @@ function enterGame(): void {
   orientation.reset();
   framePose = null;
 
+  remotePaddle = null;
+  menuBtn.hidden = false;
+  scene.updateOpponentPaddle(0, 0, null, false);
+
   game.onEvent = (evt: GameEvent) => {
     if (mode === "network") peer?.send(evt);
   };
@@ -384,8 +396,11 @@ function exitToMenu(): void {
   p?.close();
   ai = null;
   game = null;
-  bgVideo.classList.remove("visible");
-  bgVideo.srcObject = null;
+  opponentView.hidden = true;
+  opponentVideo.srcObject = null;
+  remotePaddle = null;
+  menuBtn.hidden = true;
+  scene.updateOpponentPaddle(0, 0, null, false);
   curtain.hidden = false;
   endScreen.hidden = true;
   serveBanner.hidden = true;
@@ -434,6 +449,7 @@ function step(now: number, game: GameState): void {
     paddle !== null &&
     (paddle.state === "tracked" || (paddle.state === "predicted" && game.match.phase === "rally"));
   if (canAct) game.updateLocalPaddle(paddle, now);
+  if (mode === "network") sendOurPaddle(paddle, now);
 
   if (mode === "ai" && ai) {
     ai.update(game.physics.ball, paddle, dt, now);
@@ -444,7 +460,8 @@ function step(now: number, game: GameState): void {
 
   scene.updateBall(game.physics.ball.pos);
   drawLocalPaddle(paddle);
-  if (ai) scene.updateAIMarker(ai.paddle.x, ai.paddle.y);
+  if (ai) scene.updateOpponentPaddle(ai.paddle.x, ai.paddle.y, null, true);
+  else if (mode === "network") drawRemotePaddle();
   scene.render();
 
   updateHud(paddle?.state === "tracked", now);
@@ -573,6 +590,86 @@ function drawGripGuide(surface: Surface): void {
   ctx.restore();
 }
 
+// ---------------------------------------------------------------- opponent paddle (online)
+
+/** The other player's paddle, mirrored into our court. Drawn eased toward each update. */
+let remotePaddle: PaddleState | null = null;
+const remoteShown = { x: 0, y: ARRIVAL_HEIGHT };
+let lastPaddleSentAt = 0;
+/** ~30 updates a second — the rate their camera sees their hand anyway. */
+const PADDLE_SEND_MS = 33;
+
+/** Their court is ours turned 180° about the vertical: lateral and depth flip, height doesn't. */
+function mirrorPaddle(theirs: PaddleState): PaddleState {
+  const m = (v: { x: number; y: number; z: number }) => ({ x: -v.x, y: v.y, z: -v.z });
+  return {
+    visible: theirs.visible,
+    x: -theirs.x,
+    y: theirs.y,
+    axes: theirs.axes && { x: m(theirs.axes.x), y: m(theirs.axes.y), z: m(theirs.axes.z) },
+  };
+}
+
+function drawRemotePaddle(): void {
+  const r = remotePaddle;
+  if (!r) {
+    scene.updateOpponentPaddle(0, 0, null, false);
+    return;
+  }
+  // Updates arrive ~30×/s with network jitter; easing hides the steps.
+  remoteShown.x += (r.x - remoteShown.x) * 0.5;
+  remoteShown.y += (r.y - remoteShown.y) * 0.5;
+  scene.updateOpponentPaddle(remoteShown.x, remoteShown.y, r.axes, r.visible);
+}
+
+function sendOurPaddle(paddle: ReturnType<typeof currentLocalPaddle>, now: number): void {
+  if (!peer || now - lastPaddleSentAt < PADDLE_SEND_MS) return;
+  lastPaddleSentAt = now;
+  peer.sendPaddle({
+    visible: paddle !== null,
+    x: paddle?.x ?? 0,
+    y: paddle?.y ?? 0,
+    axes: paddle?.state === "tracked" ? orientation.axes() : null,
+  });
+}
+
+// ---------------------------------------------------------------- buttons (phones have no Enter / Esc)
+
+function rematch(): void {
+  if (game?.match.phase !== "end") return;
+  endScreen.hidden = true;
+  game.requestRestart();
+}
+
+el<HTMLButtonElement>("end-again").addEventListener("click", rematch);
+el<HTMLButtonElement>("end-menu").addEventListener("click", () => {
+  if (playing) exitToMenu();
+});
+menuBtn.addEventListener("click", () => {
+  if (playing) exitToMenu();
+});
+
+/**
+ * Phones: the game needs landscape. Where the browser allows it (Android
+ * Chrome) go fullscreen and lock to landscape; where it doesn't (iPhone),
+ * the "turn your phone sideways" screen covers portrait instead. Has to run
+ * synchronously inside the tap that starts play — browsers only allow
+ * fullscreen from a user gesture.
+ */
+function goLandscape(): void {
+  if (!matchMedia("(pointer: coarse)").matches) return;
+  const lock = () => {
+    const o = screen.orientation as ScreenOrientation & { lock?: (orientation: string) => Promise<void> };
+    o.lock?.("landscape").catch(() => {});
+  };
+  const root = document.documentElement;
+  if (!document.fullscreenElement && root.requestFullscreen) {
+    root.requestFullscreen().then(lock).catch(() => {});
+  } else {
+    lock();
+  }
+}
+
 // ---------------------------------------------------------------- keyboard
 
 window.addEventListener("keydown", (e) => {
@@ -581,10 +678,7 @@ window.addEventListener("keydown", (e) => {
   const typing = e.target instanceof HTMLTextAreaElement || (e.target instanceof HTMLInputElement && e.target.type !== "range");
   if (typing) return;
 
-  if (e.key === "Enter" && game?.match.phase === "end") {
-    endScreen.hidden = true;
-    game.requestRestart();
-  }
+  if (e.key === "Enter") rematch();
   if (e.key === "Escape" && playing) exitToMenu();
   if (e.key.toLowerCase() === "d" && playing) {
     debugEl.hidden = !debugEl.hidden;
@@ -610,8 +704,8 @@ function enterLab(): void {
   curtain.hidden = true;
   viewport.classList.add("lab");
   labPanel.hidden = false;
-  scene.setMode("ai");
-  scene.showOpponent(false);
+  scene.updateOpponentPaddle(0, 0, null, false);
+  menuBtn.hidden = false;
   machine = new BallMachine();
   machine.reset(performance.now());
   labFeed.textContent = "Pause balls";

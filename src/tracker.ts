@@ -172,6 +172,8 @@ export class Tracker {
   async start(): Promise<void> {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
+        // Front camera on phones and tablets; ignored by ordinary webcams.
+        facingMode: "user",
         width: { ideal: 1280 },
         height: { ideal: 720 },
         frameRate: { ideal: 60 },
