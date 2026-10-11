@@ -19,13 +19,13 @@ npm run dev
 Open the URL it prints, then:
 
 - **Practice vs AI** — one camera, a bot opponent. Good for testing your swing without needing a second person.
-- **Play a friend, anywhere** — the real mode. One of you clicks **Host**, generates a code, sends it to the other player through any chat app. They paste it in and send back a reply code. That's the entire connection setup — after that one exchange, video and gameplay run peer-to-peer with no server in between, so it works across any distance.
+- **Play a friend, anywhere** — the real mode. One of you clicks **Host** and gets a 5-letter code and an invite link; send either to the other player. They open the link (or type the code) and tap **Join** — that's it. Video and gameplay then run directly between your two browsers, so it works across any distance.
 
 **How to play:** stand 1.5–2.5 m back from your camera, hold a hand up. Hold still inside the highlighted zone for half a second to serve. Swing to hit the ball — swing speed sets power, tilting your palm up/down aims the shot. First to 7 wins; press Enter after a match to go again, Escape to leave.
 
-### Why a copy-paste code, not an invite link
+### How the code connects you
 
-There's no signaling server deployed for this project — that's the one piece of infrastructure real WebRTC matchmaking needs and a hobby project doesn't have by default. The code is a standard WebRTC connection offer/answer, exchanged manually instead of automatically. It's two paste actions instead of one click, but it's a genuine direct connection, not a simulation — and it costs nothing to run. A real invite-link flow is a natural next step if this gets used enough to justify hosting something.
+Two browsers can't connect directly until they've swapped connection details. PeerJS's free public matchmaking server does that swap: the host registers under the 5-letter code, the guest asks for it, and the server introduces them. It never sees the video or the game — those go straight between the two players. If that public server is ever down, joining fails until it's back.
 
 ### If the connection won't go through
 

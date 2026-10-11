@@ -14,7 +14,9 @@ export type GameEvent =
 export type UiEvent =
   | { type: "hit"; by: Side }
   | { type: "point"; scorer: Side }
-  | { type: "match_end"; winner: Side };
+  | { type: "match_end"; winner: Side }
+  /** The other player started a rematch — our end screen should clear. */
+  | { type: "restart" };
 
 export interface MatchState {
   phase: GamePhase;
@@ -190,6 +192,7 @@ export class GameState {
     }
     if (evt.type === "restart") {
       this.startNewMatch();
+      this.ui.push({ type: "restart" });
     }
   }
 

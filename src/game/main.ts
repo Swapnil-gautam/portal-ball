@@ -16,7 +16,7 @@ import {
   setPaddleSetting,
   type PaddleSettings,
 } from "./paddleSettings";
-import { RTCGamePeer, type PaddleState } from "./network";
+import { RTCGamePeer, isPlausibleCode, normalizeCode, type PaddleState } from "./network";
 import type { Paddle, Side } from "./physics";
 import { Scene3D } from "./scene3d";
 import { announceCamera, otherCameraTabs } from "./tabGuard";
@@ -233,7 +233,6 @@ el<HTMLButtonElement>("ai-start").addEventListener("click", async () => {
 // ---------------------------------------------------------------- friend: host / join
 
 el<HTMLButtonElement>("pick-host").addEventListener("click", async () => {
-  goLandscape();
   show("loading-cam");
   try {
     await ensureCamera((msg) => (el<HTMLElement>("loading-status").textContent = msg));
@@ -244,8 +243,20 @@ el<HTMLButtonElement>("pick-host").addEventListener("click", async () => {
   }
 });
 
-el<HTMLButtonElement>("pick-join").addEventListener("click", () => show("join-enter"));
-el<HTMLButtonElement>("join-back").addEventListener("click", () => show("friend-choice"));
+el<HTMLButtonElement>("pick-join").addEventListener("click", () => {
+  show("join-enter");
+  joinCodeInput.focus();
+});
+el<HTMLButtonElement>("join-back").addEventListener("click", () => {
+  closePeer();
+  show("friend-choice");
+});
+
+let hostCode = "";
+
+function inviteLink(code: string): string {
+  return `${location.origin}${location.pathname}#join=${code}`;
+}
 
 async function startHost(): Promise<void> {
   mode = "network";
@@ -256,69 +267,90 @@ async function startHost(): Promise<void> {
   peer = new RTCGamePeer(stream);
   wirePeer(peer);
 
+  hostCode = "";
+  el<HTMLElement>("host-code").textContent = "· · · · ·";
+  el<HTMLElement>("host-status").textContent = "Getting a code…";
   show("host-wait");
-  el<HTMLTextAreaElement>("host-code").value = "Generating…";
-  el<HTMLTextAreaElement>("host-code").value = await peer.createInvite();
+  hostCode = await peer.host();
+  el<HTMLElement>("host-code").textContent = hostCode;
+  el<HTMLElement>("host-status").textContent = "Waiting for your friend to join…";
 }
 
-el<HTMLButtonElement>("host-copy").addEventListener("click", async () => {
-  await navigator.clipboard.writeText(el<HTMLTextAreaElement>("host-code").value);
-  flashStatus("host-status", "Copied.");
-});
-
-el<HTMLButtonElement>("host-connect").addEventListener("click", async () => {
-  const answer = el<HTMLTextAreaElement>("host-answer").value.trim();
-  if (!answer || !peer) return;
+el<HTMLButtonElement>("host-share").addEventListener("click", async () => {
+  if (!hostCode) return;
+  const url = inviteLink(hostCode);
+  const text = `Play Portal Ball with me — open this link, or enter code ${hostCode}`;
   try {
-    await peer.completeInvite(answer);
-    setDot("host-dot", "pulse");
-    el<HTMLElement>("host-status").textContent = "Connecting…";
-  } catch (err) {
-    setDot("host-dot", "bad");
-    el<HTMLElement>("host-status").textContent = `That code didn't work: ${(err as Error).message}`;
+    // Phones get the native share sheet (WhatsApp etc.); desktops get the clipboard.
+    if (navigator.share) await navigator.share({ title: "Portal Ball", text, url });
+    else {
+      await navigator.clipboard.writeText(`${text}: ${url}`);
+      flashStatus("host-status", "Invite link copied.");
+    }
+  } catch {
+    // Share sheet dismissed — nothing to do.
   }
 });
 
+el<HTMLButtonElement>("host-copy").addEventListener("click", async () => {
+  if (!hostCode) return;
+  await navigator.clipboard.writeText(hostCode);
+  flashStatus("host-status", "Code copied.");
+});
+
 el<HTMLButtonElement>("host-back").addEventListener("click", () => {
-  peer?.close();
-  peer = null;
+  closePeer();
   show("friend-choice");
 });
 
-el<HTMLButtonElement>("join-continue").addEventListener("click", async () => {
-  const code = el<HTMLTextAreaElement>("join-code").value.trim();
-  if (!code) return;
-  goLandscape();
+const joinCodeInput = el<HTMLInputElement>("join-code");
+const joinStatusLine = el<HTMLElement>("join-status-line");
 
-  show("loading-cam");
+joinCodeInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") el<HTMLButtonElement>("join-continue").click();
+});
+
+el<HTMLButtonElement>("join-continue").addEventListener("click", async () => {
+  const code = normalizeCode(joinCodeInput.value);
+  if (!isPlausibleCode(code)) {
+    errEl.textContent = "Codes are 5 letters and numbers, like K7MQX.";
+    return;
+  }
+  errEl.textContent = "";
+  joinStatusLine.hidden = false;
+  el<HTMLElement>("join-status").textContent = "Starting your camera…";
   try {
-    await ensureCamera((msg) => (el<HTMLElement>("loading-status").textContent = msg));
+    await ensureCamera((msg) => (el<HTMLElement>("join-status").textContent = msg));
     mode = "network";
     firstServer = "remote";
     const stream = tracker.getStream();
     if (!stream) throw new Error("camera stream missing");
 
+    closePeer();
     peer = new RTCGamePeer(stream);
     wirePeer(peer);
-
-    el<HTMLTextAreaElement>("join-answer").value = await peer.acceptInvite(code);
-    show("join-wait");
+    el<HTMLElement>("join-status").textContent = "Connecting…";
+    await peer.join(code); // the game starts from wirePeer once connected
   } catch (err) {
-    show("join-enter");
-    errEl.textContent = `That code didn't work: ${(err as Error).message}`;
+    closePeer();
+    joinStatusLine.hidden = true;
+    errEl.textContent = (err as Error).message;
   }
 });
 
-el<HTMLButtonElement>("join-copy").addEventListener("click", async () => {
-  await navigator.clipboard.writeText(el<HTMLTextAreaElement>("join-answer").value);
-  flashStatus("join-status", "Copied.");
-});
-
-el<HTMLButtonElement>("join-back2").addEventListener("click", () => {
+function closePeer(): void {
   peer?.close();
   peer = null;
-  show("friend-choice");
-});
+}
+
+/** Opening an invite link (…#join=K7MQX) lands on the join screen with the code filled in. */
+function openInviteLink(): void {
+  const m = /join=([A-Za-z0-9-]+)/.exec(location.hash);
+  if (!m) return;
+  joinCodeInput.value = normalizeCode(m[1]);
+  history.replaceState(null, "", location.pathname); // don't rejoin a stale code on reload
+  show("join-enter");
+}
 
 function flashStatus(id: string, msg: string): void {
   const target = el<HTMLElement>(id);
@@ -327,10 +359,6 @@ function flashStatus(id: string, msg: string): void {
   setTimeout(() => {
     if (target.textContent === msg) target.textContent = prev;
   }, 1400);
-}
-
-function setDot(id: string, state: "pulse" | "ok" | "bad"): void {
-  el<HTMLElement>(id).className = `dot-status ${state}`;
 }
 
 // ---------------------------------------------------------------- peer wiring
@@ -356,8 +384,8 @@ function wirePeer(p: RTCGamePeer): void {
       if (playing) {
         exitToMenu();
         errEl.textContent = "The connection to your opponent dropped.";
-      } else if (status === "failed") {
-        errEl.textContent = "Connection failed — the code was mismatched or stale. Try again.";
+      } else {
+        errEl.textContent = "Couldn't connect to your friend. Try a fresh code — or a different network, like a phone hotspot.";
       }
     }
   };
@@ -377,6 +405,7 @@ function enterGame(): void {
 
   remotePaddle = null;
   menuBtn.hidden = false;
+  document.body.classList.add("playing");
   scene.updateOpponentPaddle(0, 0, null, false);
 
   game.onEvent = (evt: GameEvent) => {
@@ -400,6 +429,8 @@ function exitToMenu(): void {
   opponentVideo.srcObject = null;
   remotePaddle = null;
   menuBtn.hidden = true;
+  document.body.classList.remove("playing");
+  joinStatusLine.hidden = true;
   scene.updateOpponentPaddle(0, 0, null, false);
   curtain.hidden = false;
   endScreen.hidden = true;
@@ -511,6 +542,8 @@ function handleUi(e: UiEvent): void {
     endTitle.textContent = e.winner === "local" ? "You win" : "Opponent wins";
     endTitle.className = e.winner === "local" ? "win" : "lose";
     endScreen.hidden = false;
+  } else if (e.type === "restart") {
+    endScreen.hidden = true;
   }
 }
 
@@ -636,9 +669,11 @@ function sendOurPaddle(paddle: ReturnType<typeof currentLocalPaddle>, now: numbe
 // ---------------------------------------------------------------- buttons (phones have no Enter / Esc)
 
 function rematch(): void {
-  if (game?.match.phase !== "end") return;
+  if (!game) return;
   endScreen.hidden = true;
-  game.requestRestart();
+  // If the other player already started the rematch, our game has restarted
+  // underneath this screen — just get it out of the way.
+  if (game.match.phase === "end") game.requestRestart();
 }
 
 el<HTMLButtonElement>("end-again").addEventListener("click", rematch);
@@ -647,6 +682,17 @@ el<HTMLButtonElement>("end-menu").addEventListener("click", () => {
 });
 menuBtn.addEventListener("click", () => {
   if (playing) exitToMenu();
+});
+
+const rotateFullscreen = el<HTMLButtonElement>("rotate-fullscreen");
+rotateFullscreen.hidden = !document.documentElement.requestFullscreen;
+rotateFullscreen.addEventListener("click", () => goLandscape());
+
+openInviteLink();
+// Tapping an invite link while the game is already open only changes the
+// address in place — no page load — so watch for that too.
+window.addEventListener("hashchange", () => {
+  if (!playing) openInviteLink();
 });
 
 /**
@@ -706,6 +752,7 @@ function enterLab(): void {
   labPanel.hidden = false;
   scene.updateOpponentPaddle(0, 0, null, false);
   menuBtn.hidden = false;
+  document.body.classList.add("playing");
   machine = new BallMachine();
   machine.reset(performance.now());
   labFeed.textContent = "Pause balls";
