@@ -1,13 +1,13 @@
 import "./style.css";
 
-import type { Surface } from "./draw";
+import type { Surface } from "../core/tracking/overlay2d";
 import { InterceptMode } from "./modes/intercept";
 import { LatencyMode } from "./modes/latency";
 import { TrackMode } from "./modes/track";
 import type { Mode } from "./modes/types";
-import { DEFAULT_ONE_EURO } from "./oneEuro";
-import { fmt } from "./stats";
-import { Tracker } from "./tracker";
+import { DEFAULT_ONE_EURO } from "../core/tracking/oneEuro";
+import { fmt } from "../core/tracking/stats";
+import { Tracker } from "../core/tracking/tracker";
 
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);

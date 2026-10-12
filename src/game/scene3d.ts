@@ -1,28 +1,18 @@
 import * as THREE from "three";
+import { BALL_RADIUS, CAMERA_FOV, CAMERA_LOOK, CAMERA_POS, HEAD_RADIUS, STRIKE_Z } from "./court";
 import type { PaddleAxes } from "./paddleOrientation";
+import { FACE_HALF_HEIGHT, handleY, makePickleballPaddle } from "./paddleModel";
 import { paddleSettings } from "./paddleSettings";
-import {
-  BALL_RADIUS,
-  CAMERA_FOV,
-  CAMERA_LOOK,
-  CAMERA_POS,
-  COURT_LENGTH,
-  HALF_WIDTH,
-  NET_HEIGHT,
-  HANDLE_LENGTH,
-  HEAD_RADIUS,
-  HEAD_THICKNESS,
-  STRIKE_Z,
-} from "./court";
+import { buildVenue, pickleballMaterial } from "./venue";
 
 /**
  * The 3D view from behind your end of the court. Physics already works in
  * these world units (court.ts), so positions pass straight through — no
  * second coordinate system to drift out of sync with the hit test.
  *
- * Network play clears to transparent so the opponent's live video shows
- * through from behind; solo play draws a real court with a net and a ball
- * shadow, since there's no camera feed to look at.
+ * The surroundings (court, net, fence, lights, sky) come from venue.ts and
+ * the paddles from paddleModel.ts, so other venues and paddle styles can be
+ * added later without touching this file.
  */
 
 const TRAIL_LENGTH = 7;
@@ -30,10 +20,9 @@ const TELEPORT_DISTANCE = 1.2; // a jump bigger than this per frame is a reset, 
 
 /** Per display frame, how far the drawn paddle eases toward its target orientation. */
 const RENDER_EASE = 0.6;
-const WOOD = 0xc8955a;
-const AMBER = 0xffa85c;
-const CYAN = 0x4cbecb;
-const GROUND = 0x0c1113;
+const YOUR_PADDLE = 0xff8a3d;
+const THEIR_PADDLE = 0x2fb7c4;
+const BALL_TRAIL = 0xd9f04a;
 
 export class Scene3D {
   private renderer: THREE.WebGLRenderer;
@@ -48,7 +37,7 @@ export class Scene3D {
   private localPaddle: THREE.Group;
   private opponentPaddle: THREE.Group;
   private readonly opponentTurn = new THREE.Quaternion();
-  private court: THREE.Group;
+  private readonly lastBallPos = new THREE.Vector3();
 
   private readonly ray = new THREE.Vector3();
   private readonly turnTarget = new THREE.Quaternion();
@@ -63,28 +52,16 @@ export class Scene3D {
     this.camera.lookAt(CAMERA_LOOK.x, CAMERA_LOOK.y, CAMERA_LOOK.z);
     this.camera.updateMatrixWorld();
 
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-    const key = new THREE.DirectionalLight(0xffffff, 0.9);
-    key.position.set(-3, 6, 2);
-    this.scene.add(key);
-    // From behind the camera, so the side of the paddle you actually see is
-    // lit and its shading changes as you tilt it.
-    const fill = new THREE.DirectionalLight(0xffffff, 0.7);
-    fill.position.set(2, 3, -5);
-    this.scene.add(fill);
+    buildVenue(this.scene);
 
-    this.ball = new THREE.Mesh(
-      new THREE.SphereGeometry(BALL_RADIUS, 24, 24),
-      new THREE.MeshStandardMaterial({ color: AMBER, emissive: AMBER, emissiveIntensity: 0.9 }),
-    );
-    this.ball.add(new THREE.PointLight(AMBER, 1.2, 3));
+    this.ball = new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS, 28, 20), pickleballMaterial());
     this.scene.add(this.ball);
 
     for (let i = 0; i < TRAIL_LENGTH; i++) {
       const k = 1 - (i + 1) / (TRAIL_LENGTH + 1);
       const dot = new THREE.Mesh(
         new THREE.SphereGeometry(BALL_RADIUS * (0.35 + 0.55 * k), 10, 10),
-        new THREE.MeshBasicMaterial({ color: AMBER, transparent: true, opacity: 0.35 * k, depthWrite: false }),
+        new THREE.MeshBasicMaterial({ color: BALL_TRAIL, transparent: true, opacity: 0.3 * k, depthWrite: false }),
       );
       dot.visible = false;
       this.trail.push(dot);
@@ -100,112 +77,12 @@ export class Scene3D {
     this.shadow.rotation.x = -Math.PI / 2;
     this.scene.add(this.shadow);
 
-    this.localPaddle = this.makePaddle(AMBER);
+    this.localPaddle = makePickleballPaddle(YOUR_PADDLE);
     this.scene.add(this.localPaddle);
 
-    this.opponentPaddle = this.makePaddle(CYAN);
+    this.opponentPaddle = makePickleballPaddle(THEIR_PADDLE);
     this.opponentPaddle.visible = false;
     this.scene.add(this.opponentPaddle);
-
-    this.court = this.buildCourt();
-    this.scene.add(this.court);
-    this.showCourt();
-  }
-
-  /**
-   * A table-tennis paddle: a round head with some thickness, a solid rim, and
-   * a wooden handle below it. The face is semi-transparent so you can still
-   * see the ball coming through it. Built around the head's centre, with the
-   * handle pointing down local -y and the face normal along local +z.
-   */
-  private makePaddle(color: number): THREE.Group {
-    const g = new THREE.Group();
-
-    const face = new THREE.Mesh(
-      new THREE.CylinderGeometry(HEAD_RADIUS, HEAD_RADIUS, HEAD_THICKNESS, 48),
-      new THREE.MeshStandardMaterial({
-        color,
-        emissive: color,
-        emissiveIntensity: 0.15,
-        roughness: 0.55,
-        transparent: true,
-        opacity: 0.55,
-        depthWrite: false,
-      }),
-    );
-    face.rotation.x = Math.PI / 2; // cylinder axis y → face normal along z
-
-    const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(HEAD_RADIUS, HEAD_THICKNESS * 0.6, 10, 56),
-      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35, roughness: 0.4, transparent: true }),
-    );
-
-    const handle = new THREE.Mesh(
-      new THREE.BoxGeometry(0.075, HANDLE_LENGTH, 0.05),
-      new THREE.MeshStandardMaterial({ color: WOOD, roughness: 0.7, transparent: true }),
-    );
-    handle.position.y = -(HEAD_RADIUS + HANDLE_LENGTH / 2 - 0.02);
-
-    g.add(face, rim, handle);
-    g.renderOrder = 2;
-    return g;
-  }
-
-  private buildCourt(): THREE.Group {
-    const g = new THREE.Group();
-    const len = COURT_LENGTH + 1;
-
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(HALF_WIDTH * 2 + 1.2, len),
-      new THREE.MeshStandardMaterial({ color: 0x15201f, roughness: 0.95 }),
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0, 0, COURT_LENGTH / 2);
-    g.add(floor);
-
-    const lineMat = new THREE.MeshBasicMaterial({ color: 0x5b6b70 });
-    const line = (w: number, l: number, x: number, z: number) => {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l), lineMat);
-      m.rotation.x = -Math.PI / 2;
-      m.position.set(x, 0.004, z);
-      g.add(m);
-    };
-    const baseNear = 0.3;
-    const baseFar = COURT_LENGTH - 0.3;
-    line(0.05, baseFar - baseNear, -HALF_WIDTH, COURT_LENGTH / 2); // sidelines
-    line(0.05, baseFar - baseNear, HALF_WIDTH, COURT_LENGTH / 2);
-    line(HALF_WIDTH * 2, 0.05, 0, baseNear); // baselines
-    line(HALF_WIDTH * 2, 0.05, 0, baseFar);
-    line(0.04, baseFar - baseNear, 0, COURT_LENGTH / 2); // centre line
-
-    const net = new THREE.Mesh(
-      new THREE.PlaneGeometry(HALF_WIDTH * 2 + 0.6, NET_HEIGHT),
-      new THREE.MeshBasicMaterial({ color: 0xb4c2c4, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }),
-    );
-    net.position.set(0, NET_HEIGHT / 2, COURT_LENGTH / 2);
-    g.add(net);
-
-    const tape = new THREE.Mesh(
-      new THREE.BoxGeometry(HALF_WIDTH * 2 + 0.6, 0.035, 0.035),
-      new THREE.MeshBasicMaterial({ color: 0xe8eeee }),
-    );
-    tape.position.set(0, NET_HEIGHT, COURT_LENGTH / 2);
-    g.add(tape);
-
-    return g;
-  }
-
-  /**
-   * The same court in every mode — practice, online, and the lab. (Online
-   * play used to drop the court and show the opponent's camera full-screen
-   * behind the ball; now their camera is a corner inset and their paddle is
-   * drawn at the far end, like the AI's.)
-   */
-  private showCourt(): void {
-    this.court.visible = true;
-    this.shadow.visible = true;
-    this.renderer.setClearColor(GROUND, 1);
-    this.scene.fog = new THREE.Fog(GROUND, 9, COURT_LENGTH * 2.2);
   }
 
   resize(width: number, height: number): void {
@@ -233,6 +110,15 @@ export class Scene3D {
   updateBall(pos: { x: number; y: number; z: number }): void {
     const prev = this.ball.position.clone();
     this.ball.position.set(pos.x, pos.y, pos.z);
+
+    // Roll the ball the way it's travelling, so its holes visibly turn.
+    const dx = pos.x - this.lastBallPos.x;
+    const dz = pos.z - this.lastBallPos.z;
+    if (Math.hypot(dx, dz) < 1) {
+      this.ball.rotation.x += dz / BALL_RADIUS;
+      this.ball.rotation.z -= dx / BALL_RADIUS;
+    }
+    this.lastBallPos.set(pos.x, pos.y, pos.z);
 
     // A serve or a new point teleports the ball; don't streak a trail across the court.
     if (prev.distanceTo(this.ball.position) > TELEPORT_DISTANCE) this.trailHistory.length = 0;
@@ -274,18 +160,16 @@ export class Scene3D {
       this.localPaddle.quaternion.slerp(this.turnTarget, RENDER_EASE);
     }
 
-    const [face, rim, handle] = this.localPaddle.children as THREE.Mesh[];
+    const [face, guard, handle] = this.localPaddle.children as [THREE.Mesh, THREE.Mesh, THREE.Group];
     (face.material as THREE.MeshStandardMaterial).opacity = 0.55 * strength;
-    (rim.material as THREE.MeshStandardMaterial).opacity = strength;
-    (handle.material as THREE.MeshStandardMaterial).opacity = strength;
+    (guard.material as THREE.MeshStandardMaterial).opacity = strength;
+    for (const part of handle.children as THREE.Mesh[]) (part.material as THREE.MeshStandardMaterial).opacity = strength;
 
-    // Paddle size: scale the head (face spans its local x/z before being
-    // turned to face down-court; the rim spans x/y) and keep the handle
-    // attached to the rim.
+    // Paddle size: scale the head and keep the grip attached below it.
     const k = settings.headRadius / HEAD_RADIUS;
-    face.scale.set(k, 1, k);
-    rim.scale.set(k, k, 1);
-    handle.position.y = -(settings.headRadius + HANDLE_LENGTH / 2 - 0.02);
+    face.scale.set(k, k, 1);
+    guard.scale.set(k, k, 1);
+    handle.position.y = handleY(FACE_HALF_HEIGHT * k);
   }
 
   /**

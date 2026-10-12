@@ -252,6 +252,13 @@ export class Tracker {
   private process(now: number, meta: VideoFrameCallbackMetadata | null): void {
     if (!this.landmarker || this.video.readyState < 2) return;
 
+    // Re-read every frame: turning a phone swaps the camera's width and
+    // height, and reading it once at start left angles and speeds skewed
+    // after rotating from portrait to landscape.
+    if (this.video.videoWidth && this.video.videoHeight) {
+      this.aspect = this.video.videoWidth / this.video.videoHeight;
+    }
+
     if (this.lastFrameAt !== null) this.frameInterval.push(now - this.lastFrameAt);
     this.lastFrameAt = now;
 

@@ -17,7 +17,15 @@
  * hand that's speeding up, and adaptive window sizes overshoot when it stops.
  */
 
-import { paddleSettings } from "./paddleSettings";
+/** How the fit behaves — the caller supplies these (e.g. from a settings screen), read every frame. */
+export interface MotionFitOptions {
+  /** Recent camera frames to fit through. Fewer = snappier, more = steadier. */
+  fitFrames: number;
+  /** 0 = raw position even when still, 0.95 = very steady when still. Never applies while moving. */
+  restSmoothing: number;
+}
+
+export const DEFAULT_MOTION_FIT: MotionFitOptions = { fitFrames: 6, restSmoothing: 0.8 };
 
 /** Below this speed (world units/s) the hand counts as still and gets smoothed; above MOVING, not at all. */
 const STILL_SPEED = 0.25;
@@ -41,6 +49,8 @@ export class MotionFit {
   private samples: Sample[] = [];
   private out: { x: number; y: number } | null = null;
 
+  constructor(private readonly options: () => MotionFitOptions = () => DEFAULT_MOTION_FIT) {}
+
   reset(): void {
     this.samples.length = 0;
     this.out = null;
@@ -48,7 +58,7 @@ export class MotionFit {
 
   /** Add a camera frame's position (world units, time in ms) and get the current estimate. */
   push(t: number, x: number, y: number): MotionEstimate {
-    const { fitFrames, restSmoothing } = paddleSettings();
+    const { fitFrames, restSmoothing } = this.options();
     this.samples.push({ t, x, y });
     while (this.samples.length > fitFrames) this.samples.shift();
 

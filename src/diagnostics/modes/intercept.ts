@@ -1,7 +1,7 @@
-import { clear, COLOR, drawPaddle, drawVideo, label } from "../draw";
-import type { Surface } from "../draw";
-import { fmt } from "../stats";
-import type { PaddleSample } from "../tracker";
+import { clear, COLOR, drawPaddle, drawVideo, label } from "../../core/tracking/overlay2d";
+import type { Surface } from "../../core/tracking/overlay2d";
+import { fmt } from "../../core/tracking/stats";
+import type { PaddleSample } from "../../core/tracking/tracker";
 import type { Mode, Readout } from "./types";
 
 interface Target {

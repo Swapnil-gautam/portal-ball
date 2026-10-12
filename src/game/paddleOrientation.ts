@@ -104,7 +104,7 @@ export class PaddleOrientation {
     const { slant, maxSlantDeg } = paddleSettings();
 
     // Face: start facing straight down the court and tilt toward the palm's
-    // normal — by \`slant\` of the palm's tilt, capped at maxSlantDeg.
+    // normal — by `slant` of the palm's tilt, capped at maxSlantDeg.
     const n = this.normal;
     const theta = Math.acos(clamp(n.z, -1, 1));
     const phi = Math.min(theta * slant, (maxSlantDeg * Math.PI) / 180);

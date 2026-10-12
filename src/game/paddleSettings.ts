@@ -1,11 +1,13 @@
 import { HEAD_OFFSET, HEAD_RADIUS } from "./court";
+import { devMode } from "./devMode";
 
 /**
  * How the paddle follows your hand — everything the Paddle lab can tune.
  *
- * Saved in the browser, so whatever you settle on in the lab is what the
- * game uses. Read with `paddleSettings()` every frame (it's a plain object),
- * so changes take effect immediately without restarting anything.
+ * Players always get DEFAULT_SETTINGS, so both sides of a match feel the
+ * same. In dev mode (see devMode.ts) the lab's tuning is saved in the browser
+ * and used by the game. Read with `paddleSettings()` every frame (it's a
+ * plain object), so changes take effect immediately without restarting.
  */
 
 export interface PaddleSettings {
@@ -49,9 +51,9 @@ export const DEFAULT_SETTINGS: PaddleSettings = {
   reach: 1,
   heightOffset: 0,
   headOffset: HEAD_OFFSET,
-  restSmoothing: 0.8,
+  restSmoothing: 0.85,
   lookAheadMs: 40,
-  fitFrames: 6,
+  fitFrames: 5,
   headRadius: HEAD_RADIUS,
   hitMargin: 0.6,
 };
@@ -93,7 +95,7 @@ const STORAGE_KEY = "portalBall.paddleSettings.v3";
  */
 const LEGACY_KEYS = ["portalBall.paddleSettings.v2", "portalBall.paddleSettings.v1"];
 
-let current: PaddleSettings = load();
+let current: PaddleSettings = devMode ? load() : { ...DEFAULT_SETTINGS };
 
 export function paddleSettings(): PaddleSettings {
   return current;
@@ -143,6 +145,7 @@ function load(): PaddleSettings {
 }
 
 function save(): void {
+  if (!devMode) return;
   try {
     globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(current));
   } catch {

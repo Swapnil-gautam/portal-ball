@@ -3,7 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Portal Ball</title>
+    <title>Portal Ball — pickleball you play with your hands</title>
+    <meta name="description" content="A pickleball game played with your hands: your webcam tracks your swing. Practice against a bot or play a friend anywhere, face to face over live video." />
+    <meta name="theme-color" content="#0b1430" />
+    <meta property="og:title" content="Portal Ball" />
+    <meta property="og:description" content="Pickleball you play with your hands — your webcam is the controller. Play a friend anywhere, face to face." />
+    <meta property="og:type" content="website" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2064%2064'%3E%3Ccircle%20cx%3D'32'%20cy%3D'32'%20r%3D'28'%20fill%3D'%23d9f04a'%2F%3E%3Cg%20fill%3D'%238ea524'%3E%3Ccircle%20cx%3D'22'%20cy%3D'20'%20r%3D'4'%2F%3E%3Ccircle%20cx%3D'38'%20cy%3D'18'%20r%3D'4'%2F%3E%3Ccircle%20cx%3D'46'%20cy%3D'32'%20r%3D'4'%2F%3E%3Ccircle%20cx%3D'30'%20cy%3D'32'%20r%3D'4'%2F%3E%3Ccircle%20cx%3D'16'%20cy%3D'34'%20r%3D'4'%2F%3E%3Ccircle%20cx%3D'24'%20cy%3D'46'%20r%3D'4'%2F%3E%3Ccircle%20cx%3D'40'%20cy%3D'46'%20r%3D'4'%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -72,24 +78,32 @@
         font-family: "Archivo", sans-serif;
       }
 
-      .score {
+      #scoreboard {
         position: absolute;
-        left: 0;
-        right: 0;
-        text-align: center;
+        top: 12px;
+        left: 50%;
+        transform: translateX(-50%);
         display: flex;
-        flex-direction: column;
         align-items: center;
-        gap: 2px;
+        gap: 12px;
+        padding: 6px 16px;
+        background: rgba(10, 14, 20, 0.72);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 999px;
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
       }
-      .score.opp { top: 3%; }
-      .score.you { bottom: 3%; }
+      #scoreboard .sep { color: var(--muted); font-size: 18px; }
+      .score { display: flex; align-items: center; gap: 8px; }
       .score b {
         font-variation-settings: "wdth" 108, "wght" 760;
-        font-size: clamp(28px, 5vw, 44px);
+        font-size: clamp(20px, 3.2vw, 30px);
         line-height: 1;
         color: var(--ink);
-        text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+        font-variant-numeric: tabular-nums;
+        min-width: 1ch;
+        text-align: center;
       }
       .score span {
         font-family: "JetBrains Mono", monospace;
@@ -97,17 +111,19 @@
         letter-spacing: 0.12em;
         text-transform: uppercase;
         color: var(--ink-2);
-        text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
       }
+      .score.you span { color: #ffb47a; }
+      .score.opp span { color: #7fd6df; }
+      /* A little ball marks who's serving. */
       .score .dot {
-        width: 6px;
-        height: 6px;
+        width: 8px;
+        height: 8px;
         border-radius: 50%;
-        background: var(--cyan);
-        margin-top: 2px;
-        display: none;
+        background: #d9f04a;
+        box-shadow: 0 0 6px rgba(217, 240, 74, 0.8);
+        visibility: hidden;
       }
-      .score.serving .dot { display: block; }
+      .score.serving .dot { visibility: visible; }
 
       #serve-banner {
         position: absolute;
@@ -115,6 +131,12 @@
         left: 50%;
         transform: translate(-50%, -50%);
         text-align: center;
+        padding: 10px 18px 12px;
+        background: rgba(10, 14, 20, 0.6);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 14px;
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
       }
       #serve-banner[hidden] { display: none; }
       #serve-banner p {
@@ -151,7 +173,9 @@
       #end-screen {
         position: absolute;
         inset: 0;
-        background: rgba(7, 9, 10, 0.82);
+        background: rgba(7, 10, 16, 0.62);
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -208,9 +232,12 @@
       }
       #tab-warning[hidden] { display: none; }
 
-      /* -------------------------------------------------------- paddle lab */
+      /* -------------------------------------------------------- paddle lab (dev mode) */
 
-      #viewport.lab .score,
+      /* Nothing game-specific shows until a game starts. */
+      body:not(.playing) #scoreboard,
+      body:not(.playing) #self-view,
+      #viewport.lab #scoreboard,
       #viewport.lab #serve-banner { display: none; }
 
       #lab-panel {
@@ -280,6 +307,7 @@
       .lab-actions button { margin: 0; }
       .lab-foot { font-size: 10.5px; margin: 8px 0 0; line-height: 1.5; }
 
+
       /* -------------------------------------------------------- opponent view */
 
       #opponent-view {
@@ -309,20 +337,31 @@
         text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
       }
 
-      #menu-btn {
+      #hud-buttons {
         position: absolute;
         top: 12px;
         right: 12px;
         z-index: 3;
+        display: flex;
+        gap: 6px;
+      }
+      #hud-buttons[hidden] { display: none; }
+      #hud-buttons button {
         margin: 0;
         padding: 7px 12px;
         font-size: 11.5px;
-        background: rgba(12, 17, 19, 0.75);
+        background: rgba(10, 14, 20, 0.72);
         color: var(--ink-2);
-        border: 1px solid var(--rule-strong);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
       }
-      #menu-btn:hover { color: var(--ink); background: rgba(12, 17, 19, 0.9); }
-      #menu-btn[hidden] { display: none; }
+      #hud-buttons button:hover { color: var(--ink); background: rgba(10, 14, 20, 0.9); }
+      #sound-btn svg { width: 16px; height: 16px; }
+      #sound-btn .off { display: none; }
+      #sound-btn[aria-pressed="false"] .on { display: none; }
+      #sound-btn[aria-pressed="false"] .off { display: inline; }
 
       /* Phones and tablets: the game only works sideways. */
       #rotate-hint { display: none; }
@@ -376,7 +415,9 @@
       #curtain {
         position: absolute;
         inset: 0;
-        background: var(--ground);
+        background: rgba(8, 12, 20, 0.72);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -502,6 +543,22 @@
       @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
       #err { color: var(--warn); font-size: 12px; margin-top: 10px; min-height: 1em; }
+      .choice[hidden] { display: none; }
+      .choice .dev-tag {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: rgba(255, 180, 122, 0.16);
+        color: #ffb47a;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        vertical-align: 2px;
+      }
+      .privacy { font-size: 11.5px; color: var(--muted); margin: 18px 0 0; }
+      .choice { transition: border-color 0.15s, transform 0.15s, background 0.15s; }
+      .choice:hover { transform: translateY(-1px); background: #182126; }
 
       .game-code {
         font-family: "JetBrains Mono", monospace;
@@ -547,18 +604,31 @@
           <span>opponent</span>
         </div>
 
-        <button type="button" id="menu-btn" hidden>Menu</button>
+        <div id="hud-buttons" hidden>
+          <button type="button" id="sound-btn" aria-pressed="true" aria-label="Sound on — click to mute" title="Sound (M)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M11 5 6 9H2v6h4l5 4V5z" />
+              <path class="on" d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14" />
+              <path class="off" d="m22 9-6 6M16 9l6 6" />
+            </svg>
+            <span class="label">Sound</span>
+          </button>
+          <button type="button" id="menu-btn">Menu</button>
+        </div>
 
         <div id="hud">
-          <div class="score opp" id="score-opp-row">
-            <b id="score-opp">0</b>
-            <span>opponent</span>
-            <span class="dot"></span>
-          </div>
-          <div class="score you" id="score-you-row">
-            <span class="dot"></span>
-            <span>you</span>
-            <b id="score-you">0</b>
+          <div id="scoreboard">
+            <div class="score you" id="score-you-row">
+              <span class="dot" title="serving"></span>
+              <span>you</span>
+              <b id="score-you">0</b>
+            </div>
+            <span class="sep">–</span>
+            <div class="score opp" id="score-opp-row">
+              <b id="score-opp">0</b>
+              <span>opp</span>
+              <span class="dot" title="serving"></span>
+            </div>
           </div>
 
           <div id="serve-banner" hidden>
@@ -608,9 +678,9 @@
         <div class="panel">
 
           <div data-view="landing" class="active">
-            <p class="eyebrow">Portal Ball</p>
-            <h1>Who are you playing?</h1>
-            <p>Solo practice against a bot, or a real match against another person over the internet.</p>
+            <p class="eyebrow">Pickleball · played with your hands</p>
+            <h1>Portal Ball</h1>
+            <p>Your webcam is the controller — swing your hand and the paddle swings with it. Practise against a bot, or play a friend anywhere, face to face.</p>
             <div class="choice-grid">
               <button class="choice" id="pick-ai" type="button">
                 <b>Practice vs AI</b>
@@ -620,11 +690,12 @@
                 <b>Play a friend, anywhere</b>
                 <span>Two cameras, two machines, real video between you — this is the actual game.</span>
               </button>
-              <button class="choice" id="pick-lab" type="button">
-                <b>Paddle lab</b>
-                <span>Tune how the paddle follows your hand. No opponent — a ball machine feeds you. Settings carry into the game.</span>
+              <button class="choice" id="pick-lab" type="button" hidden>
+                <b>Paddle lab <span class="dev-tag">dev</span></b>
+                <span>Tune how the paddle follows your hand. No opponent — a ball machine feeds you. Settings carry into the game on this browser.</span>
               </button>
             </div>
+            <p class="privacy">Your camera stays on your device. Video is only ever sent directly to a friend you invite.</p>
           </div>
 
           <div data-view="ai-setup">

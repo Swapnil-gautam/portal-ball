@@ -1,7 +1,7 @@
-import { clear, drawPaddle, drawSkeleton, drawVideo, label, COLOR } from "../draw";
-import type { Surface } from "../draw";
-import { fmt, Rolling } from "../stats";
-import type { PaddleSample } from "../tracker";
+import { clear, drawPaddle, drawSkeleton, drawVideo, label, COLOR } from "../../core/tracking/overlay2d";
+import type { Surface } from "../../core/tracking/overlay2d";
+import { fmt, Rolling } from "../../core/tracking/stats";
+import type { PaddleSample } from "../../core/tracking/tracker";
 import type { Mode, Readout } from "./types";
 
 /**

@@ -1,5 +1,5 @@
-import type { Surface } from "../draw";
-import type { PaddleSample } from "../tracker";
+import type { Surface } from "../../core/tracking/overlay2d";
+import type { PaddleSample } from "../../core/tracking/tracker";
 
 export type Readout = ReadonlyArray<readonly [label: string, value: string]>;
 

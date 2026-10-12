@@ -1,12 +1,14 @@
-import { clear, drawSkeleton, drawVideo, type Surface } from "../draw";
-import { Tracker } from "../tracker";
+import { clear, drawSkeleton, drawVideo, type Surface } from "../core/tracking/overlay2d";
+import { Rolling } from "../core/tracking/stats";
+import { Tracker } from "../core/tracking/tracker";
 import { AIOpponent } from "./ai";
 import { BallMachine } from "./ballMachine";
-import { ARRIVAL_HEIGHT, BALL_RADIUS } from "./court";
+import { ARRIVAL_HEIGHT, BALL_RADIUS, COURT_LENGTH } from "./court";
 import { GameState, type GameEvent, type UiEvent } from "./gamestate";
-import { HandPaddle } from "./handPaddle";
+import { PointTracker } from "../core/motion/pointTracker";
 import { PaddleOrientation } from "./paddleOrientation";
 import { INDEX_MCP, PINKY_MCP, WRIST, handPose, type HandPose } from "./paddlePose";
+import { devMode } from "./devMode";
 import {
   DEFAULT_SETTINGS,
   SETTING_SPECS,
@@ -17,9 +19,10 @@ import {
   type PaddleSettings,
 } from "./paddleSettings";
 import { RTCGamePeer, isPlausibleCode, normalizeCode, type PaddleState } from "./network";
-import type { Paddle, Side } from "./physics";
+import type { Paddle, Physics, Side } from "./physics";
 import { Scene3D } from "./scene3d";
-import { announceCamera, otherCameraTabs } from "./tabGuard";
+import { playBounce, playHit, playMatchEnd, playPoint, sound } from "./sounds";
+import { announceCamera, otherCameraTabs } from "../core/browser/tabGuard";
 
 type Mode = "ai" | "network" | "lab";
 
@@ -44,6 +47,8 @@ const errEl = el<HTMLParagraphElement>("err");
 const opponentView = el<HTMLDivElement>("opponent-view");
 const opponentVideo = el<HTMLVideoElement>("opponent-video");
 const menuBtn = el<HTMLButtonElement>("menu-btn");
+const hudButtons = el<HTMLDivElement>("hud-buttons");
+const soundBtn = el<HTMLButtonElement>("sound-btn");
 const selfView = el<HTMLDivElement>("self-view");
 const selfCanvas = el<HTMLCanvasElement>("self-canvas");
 const selfCtx = selfCanvas.getContext("2d", { alpha: false });
@@ -69,7 +74,12 @@ function show(name: string): void {
 // Right hand only: a left hand (or anyone else's) coming into view is ignored.
 const tracker = new Tracker({ detectionConfidence: 0.3, trackingConfidence: 0.25, hand: "right" });
 const scene = new Scene3D(canvas);
-const hand = new HandPaddle((u, v) => scene.screenToStrikePlane(u, v));
+/** The visible part of the strike plane — a predicted paddle never flies off it. */
+const PADDLE_BOUNDS = { x: 2.6, yMin: 0, yMax: 2.8 };
+const hand = new PointTracker(
+  (u, v) => scene.screenToStrikePlane(u, v),
+  () => ({ ...paddleSettings(), bounds: PADDLE_BOUNDS }),
+);
 let game: GameState | null = null;
 let ai: AIOpponent | null = null;
 let peer: RTCGamePeer | null = null;
@@ -90,6 +100,15 @@ function resizeSurfaces(): void {
   const selfRect = selfView.getBoundingClientRect();
   selfCanvas.width = Math.max(1, Math.round(selfRect.width * dpr));
   selfCanvas.height = Math.max(1, Math.round(selfRect.height * dpr));
+  if (!playing) renderMenuBackdrop();
+}
+
+/** The court, empty, behind the menus — so the game's look is there from the first screen. */
+function renderMenuBackdrop(): void {
+  scene.updateBall({ x: 0, y: ARRIVAL_HEIGHT * 0.85, z: COURT_LENGTH * 0.62 });
+  scene.updateLocalPaddle(0, 0, null, false);
+  scene.updateOpponentPaddle(0, 0, null, false);
+  scene.render();
 }
 
 const resizer = new ResizeObserver(resizeSurfaces);
@@ -106,10 +125,21 @@ async function ensureCamera(onProgress: (msg: string) => void): Promise<void> {
   onProgress("Requesting camera access…");
   await tracker.start();
   announceCamera();
-  // Match the corner preview to the camera's real shape, so the skeleton
-  // overlay isn't drawn over a stretched picture.
+  matchSelfViewToCamera();
+  // A phone's camera turns with the phone — portrait in the menus, landscape
+  // once you're playing — so keep following its shape rather than fixing it
+  // at whatever it was when the camera started.
+  tracker.video.addEventListener("resize", matchSelfViewToCamera);
+}
+
+/** Match the corner preview to the camera's real shape, so your picture isn't squeezed. */
+let selfViewShape = "";
+function matchSelfViewToCamera(): void {
   const { videoWidth: w, videoHeight: h } = tracker.video;
-  if (w && h) selfView.style.aspectRatio = `${w} / ${h}`;
+  const shape = `${w} / ${h}`;
+  if (!w || !h || shape === selfViewShape) return;
+  selfViewShape = shape;
+  selfView.style.aspectRatio = shape;
 }
 
 /** Paddle orientation, fed once per new camera frame of your hand. */
@@ -145,10 +175,10 @@ function headDirection(): { x: number; y: number } {
 /**
  * The paddle head — what hits the ball. It sits past your index knuckle,
  * along your knuckle line. Reach, height offset and handle length come from
- * the Paddle lab settings.
+ * the paddle settings (tunable in the Paddle lab, dev mode only).
  *
  * The head point is worked out on each camera frame and then tracked by
- * HandPaddle — the same lag-free motion fit that made the palm feel right.
+ * PointTracker — the same lag-free motion fit that made the palm feel right.
  * (Adding a separately smoothed direction to an already-tracked palm made the
  * head trail the hand and lurch on fast moves.)
  */
@@ -192,7 +222,10 @@ show("landing");
 
 el<HTMLButtonElement>("pick-ai").addEventListener("click", () => show("ai-setup"));
 el<HTMLButtonElement>("pick-friend").addEventListener("click", () => show("friend-choice"));
-el<HTMLButtonElement>("pick-lab").addEventListener("click", async () => {
+// The Paddle lab is a developer tool: only offered with ?dev (see devMode.ts).
+const pickLab = el<HTMLButtonElement>("pick-lab");
+pickLab.hidden = !devMode;
+pickLab.addEventListener("click", async () => {
   goLandscape();
   show("loading-cam");
   try {
@@ -404,7 +437,7 @@ function enterGame(): void {
   framePose = null;
 
   remotePaddle = null;
-  menuBtn.hidden = false;
+  hudButtons.hidden = false;
   document.body.classList.add("playing");
   scene.updateOpponentPaddle(0, 0, null, false);
 
@@ -428,8 +461,9 @@ function exitToMenu(): void {
   opponentView.hidden = true;
   opponentVideo.srcObject = null;
   remotePaddle = null;
-  menuBtn.hidden = true;
+  hudButtons.hidden = true;
   document.body.classList.remove("playing");
+  renderMenuBackdrop();
   joinStatusLine.hidden = true;
   scene.updateOpponentPaddle(0, 0, null, false);
   curtain.hidden = false;
@@ -467,7 +501,12 @@ function reportFrameError(err: unknown, now: number): void {
   if (now - debugUpdatedAt > 200) updateDebug(now);
 }
 
+/** Screen redraw interval and time spent drawing the 3D scene, for the D readout. */
+const screenInterval = new Rolling(120);
+const renderTime = new Rolling(120);
+
 function step(now: number, game: GameState): void {
+  screenInterval.push(now - lastFrameAt);
   const dt = Math.min((now - lastFrameAt) / 1000, 0.05);
   lastFrameAt = now;
 
@@ -487,13 +526,16 @@ function step(now: number, game: GameState): void {
     game.updateAIPaddle(ai.paddle, ai.intent, now);
   }
 
-  for (const e of game.step(dt, now)) handleUi(e);
+  for (const e of game.step(dt, now)) handleUi(e, game.physics);
+  soundBounces(game.physics);
 
   scene.updateBall(game.physics.ball.pos);
   drawLocalPaddle(paddle);
   if (ai) scene.updateOpponentPaddle(ai.paddle.x, ai.paddle.y, null, true);
   else if (mode === "network") drawRemotePaddle();
+  const renderStart = performance.now();
   scene.render();
+  renderTime.push(performance.now() - renderStart);
 
   updateHud(paddle?.state === "tracked", now);
   renderSelfView();
@@ -511,7 +553,12 @@ function updateTabWarning(now: number): void {
   tabWarning.hidden = otherCameraTabs() === 0;
 }
 
-const PADDLE_STRENGTH = { tracked: 1, predicted: 0.6, held: 0.3 } as const;
+/**
+ * Fades the paddle only once the hand has been gone a while (held). A short
+ * prediction during a fast swing is almost always right, and dimming for it
+ * made the paddle blink every time the camera missed a blurred frame.
+ */
+const PADDLE_STRENGTH = { tracked: 1, predicted: 1, held: 0.35 } as const;
 
 // ---------------------------------------------------------------- debug readout (D)
 
@@ -524,7 +571,8 @@ function updateDebug(now: number): void {
   const d = hand.stats;
   const seen = tracker.latest.seen.map((h) => `${h.label ?? "?"} ${Math.round(h.score * 100)}%`).join(", ") || "none";
   debugEl.textContent = [
-    `camera ${fps.toFixed(0)} fps · tracker ${tracker.inference.mean.toFixed(0)} ms (${tracker.delegate})`,
+    `camera ${fps.toFixed(0)} fps · tracker ${tracker.inference.mean.toFixed(0)} ms, slow frames ${tracker.inference.percentile(0.95).toFixed(0)} ms (${tracker.delegate})`,
+    `screen ${screenInterval.mean ? (1000 / screenInterval.mean).toFixed(0) : "?"} fps · drawing the court ${renderTime.mean.toFixed(1)} ms`,
     `hands seen: ${seen} · your hand is labelled "${tracker.playingLabel ?? "?"}" on this camera`,
     `hand lost ${d.count}× · longest ${d.longestMs.toFixed(0)} ms · last ${d.lastMs.toFixed(0)} ms`,
     `lost longer than prediction covers: ${d.overPredict}×`,
@@ -533,8 +581,11 @@ function updateDebug(now: number): void {
   ].join("\n");
 }
 
-function handleUi(e: UiEvent): void {
-  if (e.type === "point") {
+function handleUi(e: UiEvent, physics: Physics): void {
+  if (e.type === "hit") {
+    playHit(shotPower(physics), e.by === "remote");
+  } else if (e.type === "point") {
+    playPoint(e.scorer === "local");
     pointFlash.className = e.scorer === "local" ? "you show" : "opp show";
     window.clearTimeout(flashTimer);
     flashTimer = window.setTimeout(() => pointFlash.classList.remove("show"), 260);
@@ -542,9 +593,28 @@ function handleUi(e: UiEvent): void {
     endTitle.textContent = e.winner === "local" ? "You win" : "Opponent wins";
     endTitle.className = e.winner === "local" ? "win" : "lose";
     endScreen.hidden = false;
+    playMatchEnd(e.winner === "local");
   } else if (e.type === "restart") {
     endScreen.hidden = true;
   }
+}
+
+/** 0..1 from how fast the ball just left the paddle (slowest to fastest planned shot). */
+function shotPower(physics: Physics): number {
+  return Math.max(0, Math.min(1, (Math.abs(physics.ball.vel.z) - 5) / 3));
+}
+
+let bounceSource: Physics | null = null;
+let bouncesHeard = 0;
+function soundBounces(physics: Physics): void {
+  if (physics !== bounceSource) {
+    bounceSource = physics;
+    bouncesHeard = physics.bounceCount;
+    return;
+  }
+  if (physics.bounceCount === bouncesHeard) return;
+  bouncesHeard = physics.bounceCount;
+  playBounce(physics.lastBounceSpeed, physics.ball.pos.z > COURT_LENGTH / 2);
 }
 
 function updateHud(handVisible: boolean, now: number): void {
@@ -572,6 +642,8 @@ function updateHud(handVisible: boolean, now: number): void {
 
 function renderSelfView(): void {
   if (!selfCtx) return;
+  // Backup for browsers that don't announce the camera turning: cheap, and a no-op unless it changed.
+  matchSelfViewToCamera();
   const surface: Surface = {
     ctx: selfCtx,
     w: selfCanvas.width,
@@ -716,6 +788,26 @@ function goLandscape(): void {
   }
 }
 
+// ---------------------------------------------------------------- sound
+
+// Browsers only allow audio to start from a tap/click/key — unlock on any of them.
+window.addEventListener("pointerdown", () => sound.unlock());
+window.addEventListener("keydown", () => sound.unlock());
+
+function syncSoundButton(): void {
+  soundBtn.setAttribute("aria-pressed", String(sound.enabled));
+  soundBtn.setAttribute("aria-label", sound.enabled ? "Sound on — click to mute" : "Sound off — click to unmute");
+}
+
+function toggleSound(): void {
+  sound.unlock();
+  sound.toggle();
+  syncSoundButton();
+}
+
+soundBtn.addEventListener("click", toggleSound);
+syncSoundButton();
+
 // ---------------------------------------------------------------- keyboard
 
 window.addEventListener("keydown", (e) => {
@@ -726,13 +818,14 @@ window.addEventListener("keydown", (e) => {
 
   if (e.key === "Enter") rematch();
   if (e.key === "Escape" && playing) exitToMenu();
+  if (e.key.toLowerCase() === "m") toggleSound();
   if (e.key.toLowerCase() === "d" && playing) {
     debugEl.hidden = !debugEl.hidden;
     if (!debugEl.hidden) updateDebug(performance.now());
   }
 });
 
-// ---------------------------------------------------------------- paddle lab
+// ---------------------------------------------------------------- paddle lab (dev mode)
 
 const labPanel = el<HTMLElement>("lab-panel");
 const labSliders = el<HTMLDivElement>("lab-sliders");
@@ -751,7 +844,7 @@ function enterLab(): void {
   viewport.classList.add("lab");
   labPanel.hidden = false;
   scene.updateOpponentPaddle(0, 0, null, false);
-  menuBtn.hidden = false;
+  hudButtons.hidden = false;
   document.body.classList.add("playing");
   machine = new BallMachine();
   machine.reset(performance.now());
@@ -775,17 +868,21 @@ function labFrame(now: number): void {
 }
 
 function labStep(now: number, m: BallMachine): void {
+  screenInterval.push(now - lastFrameAt);
   const dt = Math.min((now - lastFrameAt) / 1000, 0.05);
   lastFrameAt = now;
 
   m.physics.localContactRadius = contactRadius();
   const paddle = currentLocalPaddle(now);
   // Same rule as the game: a paddle frozen in place after losing your hand can't hit.
-  m.update(paddle && paddle.state !== "held" ? paddle : null, dt, now);
+  if (m.update(paddle && paddle.state !== "held" ? paddle : null, dt, now)) playHit(shotPower(m.physics));
+  soundBounces(m.physics);
 
   scene.updateBall(m.physics.ball.pos);
   drawLocalPaddle(paddle);
+  const renderStart = performance.now();
   scene.render();
+  renderTime.push(performance.now() - renderStart);
   renderSelfView();
   if (now - labReadoutAt > 150) updateLabReadout(now, paddle);
   if (!debugEl.hidden && now - debugUpdatedAt > 200) updateDebug(now);

@@ -21,7 +21,9 @@ Open the URL it prints, then:
 - **Practice vs AI** — one camera, a bot opponent. Good for testing your swing without needing a second person.
 - **Play a friend, anywhere** — the real mode. One of you clicks **Host** and gets a 5-letter code and an invite link; send either to the other player. They open the link (or type the code) and tap **Join** — that's it. Video and gameplay then run directly between your two browsers, so it works across any distance.
 
-**How to play:** stand 1.5–2.5 m back from your camera, hold a hand up. Hold still inside the highlighted zone for half a second to serve. Swing to hit the ball — swing speed sets power, tilting your palm up/down aims the shot. First to 7 wins; press Enter after a match to go again, Escape to leave.
+**How to play:** stand 1.5–2.5 m back from your camera, hold a hand up. Hold still inside the highlighted zone for half a second to serve. Swing to hit the ball — swing speed sets power, tilting your palm up/down aims the shot. First to 7 wins; press Enter after a match to go again, Escape to leave. **M** toggles sound; **D** shows tracking and frame-rate numbers.
+
+**Developer tools:** open the game with `?dev` (e.g. `game.html?dev`) to show the **Paddle lab** — a ball machine plus sliders for how the paddle follows your hand. It's remembered in that browser until you open `?dev=0`. Lab tuning only applies in dev mode; players always get the built-in settings, so both sides of a match feel the same.
 
 ### How the code connects you
 
@@ -129,13 +131,15 @@ No networking, no video compositing, no art. Those are Spikes 2, 3, and later.
 
 ```
 src/
-  main.ts           bootstrap, mode routing, instrument panel
-  tracker.ts        camera + MediaPipe, emits PaddleSample per camera frame
-  oneEuro.ts        One-Euro filter and the cross-correlation lag estimator
-  draw.ts           shared canvas helpers, palette
-  stats.ts          rolling window, formatters
-  modes/            track / latency / intercept
-scripts/            wasm copy, model fetch
+  core/               reusable for any camera app (drums, pose games…), nothing paddle-specific
+    tracking/         camera + MediaPipe hand tracker, handedness chooser, filters, 2D overlay
+    motion/           lag-free motion fit and PointTracker (predict/hold through dropouts)
+    audio/            tiny Web Audio synth with a persisted mute switch
+    browser/          one-camera-tab guard
+  game/               Portal Ball: court, physics, rules, AI, 3D scene, venue, paddles, sounds, network
+  diagnostics/        the latency/tracking instrument panel (index.html)
+    modes/            track / latency / intercept
+scripts/              wasm copy, model fetch
 ```
 
 `public/mediapipe/` and `public/models/` are generated — `npm run setup` rebuilds them.

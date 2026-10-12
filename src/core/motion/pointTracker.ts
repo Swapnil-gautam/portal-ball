@@ -1,28 +1,28 @@
-import { MotionFit } from "./motionFit";
-import { paddleSettings } from "./paddleSettings";
-import type { Paddle } from "./physics";
+import { MotionFit, type MotionFitOptions } from "./motionFit";
 
 /**
- * Turns per-camera-frame hand samples into a paddle that doesn't blink out.
+ * Turns per-camera-frame samples of a point on the hand (a paddle head, a
+ * drumstick tip, a fingertip…) into a smooth, lag-free position that doesn't
+ * blink out when tracking drops.
  *
- * Fast swings blur the hand and the tracker drops it for a few frames —
- * exactly when the paddle matters most. When that happens the paddle:
+ * Fast moves blur the hand and the tracker drops it for a few frames —
+ * exactly when the point matters most. When that happens it:
  *
  *   1. predicts (≤ PREDICT_MS): keeps moving in the direction and at the
  *      speed fitted from the last several camera frames (see MotionFit).
  *      It extrapolates velocity only, not acceleration — simulated against
- *      a noisy swing, extrapolating acceleration sent the paddle up to 10
+ *      a noisy swing, extrapolating acceleration sent the point up to 10
  *      units off.
  *   2. holds (≤ HOLD_MS): no prediction is accurate past ~250ms, so it stops
  *      where it got to, faded, rather than vanishing.
  *   3. hides, only once the hand has really been gone a while.
  *
- * When the hand comes back the paddle glides to it instead of snapping, and
+ * When the hand comes back the point glides to it instead of snapping, and
  * shot speed is measured from the last real sighting, so a dropout can't
  * become a phantom full-power swing.
  */
 
-export interface HandSample {
+export interface PointSample {
   present: boolean;
   /** Screen position 0..1 (already mirrored for display). */
   u: number;
@@ -37,10 +37,29 @@ export interface HandSample {
   offset?: { x: number; y: number };
 }
 
-export type PaddleState = "tracked" | "predicted" | "held";
+export type PointState = "tracked" | "predicted" | "held";
 
-export interface PaddleReading extends Paddle {
-  state: PaddleState;
+/** Where the point is now, and how it's moving (units per second), in the caller's units. */
+export interface PointReading {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  state: PointState;
+}
+
+export interface PointBounds {
+  /** Half-width: x stays within ±x. */
+  x: number;
+  yMin: number;
+  yMax: number;
+}
+
+export interface PointTrackerOptions extends MotionFitOptions {
+  /** How far ahead (ms) to project between camera frames. */
+  lookAheadMs: number;
+  /** Where a projected or predicted point may go — e.g. the visible play area. */
+  bounds?: PointBounds;
 }
 
 /** How long the hand has been missing, for the debug readout. */
@@ -48,7 +67,7 @@ export interface DropoutStats {
   count: number;
   longestMs: number;
   lastMs: number;
-  /** Dropouts long enough that the paddle had to hold still instead of predicting. */
+  /** Dropouts long enough that the point had to hold still instead of predicting. */
   overPredict: number;
 }
 
@@ -71,11 +90,11 @@ const REFIT_GAP_MS = 250;
 /** Fraction of the remaining gap closed per display frame when the hand reappears — quick, but not a snap. */
 const SETTLE_RATE = 0.7;
 const SETTLED = 0.03;
-/** Visible area of the strike plane, roughly; a predicted paddle won't leave it. */
-const BOUNDS = { x: 2.6, yMin: 0, yMax: 2.8 };
+/** No limit unless the caller gives one. */
+const UNBOUNDED: PointBounds = { x: Infinity, yMin: -Infinity, yMax: Infinity };
 
-export class HandPaddle {
-  /** Where the paddle is shown and hit-tested. */
+export class PointTracker {
+  /** Where the point is shown (and, for the paddle game, hit-tested). */
   private px = 0;
   private py = 0;
   /** Where the hand really is, per the motion fit. */
@@ -87,27 +106,35 @@ export class HandPaddle {
   /** The same velocity, slowing down while predicting through a dropout. */
   private predVx = 0;
   private predVy = 0;
-  private readonly fit = new MotionFit();
+  private readonly fit: MotionFit;
   private predictT = 0;
   private lastReal: { x: number; y: number; t: number } | null = null;
   private lastSampleT = -1;
   private valid = false;
   private missing = false;
   private settling = false;
-  /** When the current dropout began. Survives the paddle hiding, so long dropouts still get counted. */
+  /** When the current dropout began. Survives the point hiding, so long dropouts still get counted. */
   private lostFrom: number | null = null;
 
   readonly stats: DropoutStats = { count: 0, longestMs: 0, lastMs: 0, overPredict: 0 };
 
-  /** `toPlane` maps a screen point onto the strike plane in world units. */
-  constructor(private readonly toPlane: (u: number, v: number) => { x: number; y: number }) {}
+  /**
+   * `toPlane` maps a screen point (0..1) into the caller's units (for the
+   * paddle game, the court's strike plane). `options` is read every frame.
+   */
+  constructor(
+    private readonly toPlane: (u: number, v: number) => { x: number; y: number },
+    private readonly options: () => PointTrackerOptions,
+  ) {
+    this.fit = new MotionFit(options);
+  }
 
   reset(): void {
     this.lostFrom = null;
     this.forget();
   }
 
-  /** Drop the paddle's state, but keep counting the dropout in progress. */
+  /** Drop the point's state, but keep counting the dropout in progress. */
   private forget(): void {
     this.valid = false;
     this.missing = false;
@@ -119,14 +146,15 @@ export class HandPaddle {
   }
 
   /** Call once per display frame with the latest sample. Returns null when there's no hand to show. */
-  update(sample: HandSample, now: number): PaddleReading | null {
+  update(sample: PointSample, now: number): PointReading | null {
     if (sample.present) {
       if (sample.t !== this.lastSampleT) this.takeSample(sample);
 
       const moving = clamp(Math.hypot(this.vx, this.vy) / LEAD_FULL_SPEED, 0, 1);
-      const lead = this.lastReal ? (clamp(now - this.lastReal.t, 0, paddleSettings().lookAheadMs) / 1000) * moving : 0;
-      const gx = clamp(this.tx + this.vx * lead, -BOUNDS.x, BOUNDS.x);
-      const gy = clamp(this.ty + this.vy * lead, BOUNDS.yMin, BOUNDS.yMax);
+      const lead = this.lastReal ? (clamp(now - this.lastReal.t, 0, this.options().lookAheadMs) / 1000) * moving : 0;
+      const b = this.options().bounds ?? UNBOUNDED;
+      const gx = clamp(this.tx + this.vx * lead, -b.x, b.x);
+      const gy = clamp(this.ty + this.vy * lead, b.yMin, b.yMax);
 
       if (this.settling) {
         this.px += (gx - this.px) * SETTLE_RATE;
@@ -159,8 +187,9 @@ export class HandPaddle {
       const decay = Math.exp(-PREDICT_DECAY * dt);
       this.predVx *= decay;
       this.predVy *= decay;
-      this.px = clamp(this.px + this.predVx * dt, -BOUNDS.x, BOUNDS.x);
-      this.py = clamp(this.py + this.predVy * dt, BOUNDS.yMin, BOUNDS.yMax);
+      const b = this.options().bounds ?? UNBOUNDED;
+      this.px = clamp(this.px + this.predVx * dt, -b.x, b.x);
+      this.py = clamp(this.py + this.predVy * dt, b.yMin, b.yMax);
       this.predictT = now;
       this.settling = false;
       return this.reading("predicted");
@@ -171,7 +200,7 @@ export class HandPaddle {
     return this.reading("held");
   }
 
-  private takeSample(s: HandSample): void {
+  private takeSample(s: PointSample): void {
     const mapped = this.toPlane(s.u, s.v);
     const raw = s.offset ? { x: mapped.x + s.offset.x, y: mapped.y + s.offset.y } : mapped;
     if (this.lastReal && s.t - this.lastReal.t > REFIT_GAP_MS) this.fit.reset();
@@ -205,7 +234,7 @@ export class HandPaddle {
     this.missing = false;
   }
 
-  private reading(state: PaddleState): PaddleReading {
+  private reading(state: PointState): PointReading {
     return { x: this.px, y: this.py, vx: this.vx, vy: this.vy, state };
   }
 }

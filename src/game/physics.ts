@@ -142,6 +142,10 @@ export class Physics {
    */
   localContactRadius = CONTACT_RADIUS;
 
+  /** Floor bounces so far, and how hard the last one hit — for bounce sounds. */
+  bounceCount = 0;
+  lastBounceSpeed = 0;
+
   ball: Ball = {
     pos: { x: 0, y: ARRIVAL_HEIGHT, z: STRIKE_Z.local },
     vel: { x: 0, y: 0, z: 0 },
@@ -204,6 +208,8 @@ export class Physics {
     b.pos.z += b.vel.z * h;
 
     if (b.pos.y < FLOOR_Y) {
+      this.bounceCount++;
+      this.lastBounceSpeed = Math.abs(b.vel.y);
       const planned = b.plannedBounce;
       const e = b.nextRestitution;
       b.nextRestitution = DEFAULT_RESTITUTION;
