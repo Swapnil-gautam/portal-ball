@@ -3,3 +3,8 @@ dist/
 public/mediapipe/
 public/models/
 *.local
+
+# Local recordings (may show faces) — never commit
+*.mp4
+*.webm
+*.mov
