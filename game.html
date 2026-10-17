@@ -273,6 +273,7 @@
       }
       #debug[hidden] { display: none; }
 
+      #version-warning,
       #tab-warning {
         position: absolute;
         top: 12px;
@@ -289,7 +290,23 @@
         line-height: 1.45;
         text-align: center;
       }
-      #tab-warning[hidden] { display: none; }
+      #tab-warning[hidden],
+      #version-warning[hidden] { display: none; }
+      #version-warning { top: 56px; }
+
+      #update-pill {
+        position: fixed;
+        left: 50%;
+        bottom: 16px;
+        transform: translateX(-50%);
+        z-index: 20;
+        margin: 0;
+        padding: 8px 16px;
+        border-radius: 999px;
+        font-size: 12.5px;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+      }
+      #update-pill[hidden] { display: none; }
 
       /* -------------------------------------------------------- paddle lab (dev mode) */
 
@@ -728,6 +745,10 @@
           </div>
         </div>
 
+        <div id="version-warning" role="alert" hidden>
+          You and your friend are on different versions of the game, so the score may not end the same for both. Both of you: go back to the menu, refresh the page, and connect again.
+        </div>
+
         <div id="tab-warning" role="alert" hidden>
           Portal Ball is also running in another tab. Close the other tab — both are using the camera and slowing each other down.
         </div>
@@ -844,6 +865,7 @@
       </div>
     </div>
 
+    <button type="button" id="update-pill" hidden>New version ready — tap to update</button>
     <script type="module" src="/src/game/main.ts"></script>
   </body>
 </html>

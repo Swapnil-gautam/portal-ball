@@ -82,7 +82,10 @@ type WireMessage =
   // Round-trip probe. Both timestamps are the *sender's* clock, so the RTT is
   // computed on one machine — never compare performance.now() across machines.
   | { type: "ping"; t: number }
-  | { type: "pong"; t: number };
+  | { type: "pong"; t: number }
+  // First thing each side sends: which build it's running. Different builds
+  // can disagree on the rules (e.g. how many points win), so both must match.
+  | { type: "hello"; build: string };
 
 export type PeerStatus = "connected" | "disconnected" | "failed";
 
@@ -99,8 +102,13 @@ export class RTCGamePeer {
   onEvent: ((e: GameEvent) => void) | null = null;
   onPaddle: ((p: PaddleState) => void) | null = null;
   onStatus: ((status: PeerStatus) => void) | null = null;
+  /** The other player's build id, from their hello. */
+  onHello: ((build: string) => void) | null = null;
 
-  constructor(private readonly localStream: MediaStream) {}
+  constructor(
+    private readonly localStream: MediaStream,
+    private readonly build: string,
+  ) {}
 
   /** Measured one-way delay, ms. A reasonable guess until the first round trip is in. */
   get latencyMs(): number {
@@ -166,6 +174,7 @@ export class RTCGamePeer {
       const msg = raw as WireMessage;
       if (msg.type === "event") this.onEvent?.(msg.event);
       else if (msg.type === "paddle") this.onPaddle?.(msg.p);
+      else if (msg.type === "hello") this.onHello?.(msg.build);
       else if (msg.type === "ping") this.sendRaw({ type: "pong", t: msg.t });
       else if (msg.type === "pong") {
         const rtt = performance.now() - msg.t;
@@ -188,6 +197,7 @@ export class RTCGamePeer {
   private markConnected(): void {
     if (this.reportedConnected) return;
     this.reportedConnected = true;
+    this.sendRaw({ type: "hello", build: this.build });
     this.onStatus?.("connected");
     this.sendRaw({ type: "ping", t: performance.now() });
     this.pingTimer = window.setInterval(() => this.sendRaw({ type: "ping", t: performance.now() }), PING_EVERY_MS);

@@ -24,6 +24,7 @@ import type { Paddle, Physics, Side } from "./physics";
 import { Scene3D } from "./scene3d";
 import { playBounce, playCheer, playHit, playMatchEnd, playPoint, sound } from "./sounds";
 import { announceCamera, otherCameraTabs } from "../core/browser/tabGuard";
+import { watchForUpdates } from "../core/browser/updateCheck";
 
 type Mode = "ai" | "network" | "lab";
 
@@ -72,6 +73,11 @@ const confetti = new Confetti(el<HTMLCanvasElement>("confetti"));
 
 const views = Array.from(document.querySelectorAll<HTMLElement>("[data-view]"));
 function show(name: string): void {
+  // Back on the home screen with a newer version waiting: take it now.
+  if (name === "landing" && updateReady) {
+    location.reload();
+    return;
+  }
   errEl.textContent = "";
   for (const v of views) v.classList.toggle("active", v.dataset.view === name);
 }
@@ -302,7 +308,7 @@ async function startHost(): Promise<void> {
   const stream = tracker.getStream();
   if (!stream) throw new Error("camera stream missing");
 
-  peer = new RTCGamePeer(stream);
+  peer = new RTCGamePeer(stream, __BUILD_ID__);
   wirePeer(peer);
 
   hostCode = "";
@@ -365,7 +371,7 @@ el<HTMLButtonElement>("join-continue").addEventListener("click", async () => {
     if (!stream) throw new Error("camera stream missing");
 
     closePeer();
-    peer = new RTCGamePeer(stream);
+    peer = new RTCGamePeer(stream, __BUILD_ID__);
     wirePeer(peer);
     el<HTMLElement>("join-status").textContent = "Connecting…";
     await peer.join(code); // the game starts from wirePeer once connected
@@ -414,10 +420,21 @@ function wirePeer(p: RTCGamePeer): void {
 
   p.onEvent = (evt: GameEvent) => game?.applyRemoteEvent(evt, p.latencyMs);
 
+  // Same rules on both sides, or the match can't end the same way for both.
+  let heardHello = false;
+  p.onHello = (theirBuild) => {
+    heardHello = true;
+    versionWarning.hidden = theirBuild === __BUILD_ID__;
+  };
+
   p.onStatus = (status) => {
     if (status === "connected" && !playing) {
       game = new GameState("network", firstServer);
       enterGame();
+      // An older version never says hello at all.
+      window.setTimeout(() => {
+        if (!heardHello && peer === p) versionWarning.hidden = false;
+      }, 4000);
     } else if (status === "failed" || status === "disconnected") {
       if (playing) {
         exitToMenu();
@@ -473,6 +490,7 @@ function exitToMenu(): void {
   renderMenuBackdrop();
   joinStatusLine.hidden = true;
   scene.updateOpponentPaddle(0, 0, null, false);
+  versionWarning.hidden = true;
   curtain.hidden = false;
   endScreen.hidden = true;
   clearCelebration();
@@ -549,6 +567,44 @@ function step(now: number, game: GameState): void {
   renderSelfView();
   if (!debugEl.hidden && now - debugUpdatedAt > 200) updateDebug(now);
   updateTabWarning(now);
+}
+
+// ---------------------------------------------------------------- staying up to date
+
+const versionWarning = el<HTMLDivElement>("version-warning");
+const updatePill = el<HTMLButtonElement>("update-pill");
+/** A newer version has been published since this page loaded. */
+let updateReady = false;
+let firstCheck = true;
+
+updatePill.addEventListener("click", () => location.reload());
+
+/** Reload by itself at most once per new version, in case a cache keeps serving the old page. */
+function alreadyReloadedFor(build: string): boolean {
+  try {
+    if (sessionStorage.getItem("portalBall.reloadedFor") === build) return true;
+    sessionStorage.setItem("portalBall.reloadedFor", build);
+  } catch {
+    // storage blocked: reloading once more is harmless
+  }
+  return false;
+}
+
+if (!import.meta.env.DEV) {
+  void watchForUpdates({
+    currentBuild: __BUILD_ID__,
+    url: `${import.meta.env.BASE_URL}version.json`,
+    everyMs: 60_000,
+    onUpdate: (build) => {
+      updateReady = true;
+      // Just opened (maybe from an old cached copy), or sitting on the home
+      // screen: reload straight away — an invite link in the address survives.
+      // Mid-match or mid-setup: offer it, and take it on the way back to the menu.
+      const onHome = document.querySelector('[data-view="landing"]')?.classList.contains("active");
+      if (!playing && (firstCheck || onHome) && !alreadyReloadedFor(build)) location.reload();
+      else updatePill.hidden = false;
+    },
+  }).then(() => (firstCheck = false));
 }
 
 const tabWarning = el<HTMLDivElement>("tab-warning");
