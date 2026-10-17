@@ -24,6 +24,8 @@ export interface ToneOptions {
 export interface NoiseOptions {
   duration: number;
   gain: number;
+  /** Seconds to swell in (default: instant, like a hit). */
+  attack?: number;
   filter: BiquadFilterType;
   frequency: number;
   q?: number;
@@ -92,23 +94,24 @@ export class Synth {
     const t = ctx.currentTime + (o.delay ?? 0);
     const src = ctx.createBufferSource();
     src.buffer = this.noiseBuffer ??= makeNoise(ctx);
+    src.loop = true; // the buffer is short; long sounds just keep reading it
     const filter = ctx.createBiquadFilter();
     filter.type = o.filter;
     filter.frequency.value = o.frequency;
     filter.Q.value = o.q ?? 1;
-    const env = envelope(ctx, t, o.duration, o.gain);
+    const env = envelope(ctx, t, o.duration, o.gain, o.attack);
     src.connect(filter).connect(env).connect(this.master);
     src.start(t);
     src.stop(t + o.duration + 0.02);
   }
 }
 
-/** Fast attack, exponential decay — the shape of anything struck. */
-function envelope(ctx: AudioContext, t: number, duration: number, gain: number): GainNode {
+/** Fast attack (or a swell, with `attack`), exponential decay — the shape of anything struck. */
+function envelope(ctx: AudioContext, t: number, duration: number, gain: number, attack = 0.004): GainNode {
   const g = ctx.createGain();
   const peak = Math.max(0.0002, gain);
   g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(peak, t + 0.004);
+  g.gain.exponentialRampToValueAtTime(peak, t + Math.min(attack, duration * 0.8));
   g.gain.exponentialRampToValueAtTime(0.0001, t + duration);
   return g;
 }

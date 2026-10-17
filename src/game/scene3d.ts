@@ -1,18 +1,21 @@
 import * as THREE from "three";
-import { BALL_RADIUS, CAMERA_FOV, CAMERA_LOOK, CAMERA_POS, HEAD_RADIUS, STRIKE_Z } from "./court";
+import { Avatar, type AvatarStyle } from "./avatar";
+import { BALL_RADIUS, CAMERA_FOV, CAMERA_LOOK, CAMERA_POS, HALF_WIDTH, HEAD_RADIUS, STRIKE_Z } from "./court";
 import type { PaddleAxes } from "./paddleOrientation";
 import { FACE_HALF_HEIGHT, handleY, makePickleballPaddle } from "./paddleModel";
 import { paddleSettings } from "./paddleSettings";
-import { buildVenue, pickleballMaterial } from "./venue";
+import type { Side } from "./physics";
+import { buildVenue, pickleballMaterial, type Venue } from "./venue";
 
 /**
  * The 3D view from behind your end of the court. Physics already works in
  * these world units (court.ts), so positions pass straight through — no
  * second coordinate system to drift out of sync with the hit test.
  *
- * The surroundings (court, net, fence, lights, sky) come from venue.ts and
- * the paddles from paddleModel.ts, so other venues and paddle styles can be
- * added later without touching this file.
+ * The surroundings (court, net, fence, lights, crowd, sky) come from
+ * venue.ts, the paddles from paddleModel.ts and the opponent figure from
+ * avatar.ts, so other venues, paddle styles and characters can be added
+ * later without touching this file.
  */
 
 const TRAIL_LENGTH = 7;
@@ -36,6 +39,10 @@ export class Scene3D {
 
   private localPaddle: THREE.Group;
   private opponentPaddle: THREE.Group;
+  private readonly venue: Venue;
+  private readonly avatar: Avatar;
+  private readonly gripPoint = new THREE.Vector3();
+  private lastRenderAt = performance.now();
   private readonly opponentTurn = new THREE.Quaternion();
   private readonly lastBallPos = new THREE.Vector3();
 
@@ -52,7 +59,7 @@ export class Scene3D {
     this.camera.lookAt(CAMERA_LOOK.x, CAMERA_LOOK.y, CAMERA_LOOK.z);
     this.camera.updateMatrixWorld();
 
-    buildVenue(this.scene);
+    this.venue = buildVenue(this.scene);
 
     this.ball = new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS, 28, 20), pickleballMaterial());
     this.scene.add(this.ball);
@@ -83,6 +90,43 @@ export class Scene3D {
     this.opponentPaddle = makePickleballPaddle(THEIR_PADDLE);
     this.opponentPaddle.visible = false;
     this.scene.add(this.opponentPaddle);
+
+    // The opponent stands just behind their paddle, holding it.
+    this.avatar = new Avatar(STRIKE_Z.remote + 0.42, THEIR_PADDLE, HALF_WIDTH + 0.5);
+    this.avatar.group.visible = false;
+    this.scene.add(this.avatar.group);
+  }
+
+  /** The practice partner wears a cap; a friend, a white shirt and headband. */
+  setOpponentStyle(style: AvatarStyle): void {
+    this.avatar.setStyle(style);
+  }
+
+  /** A point ended: the winner's side reacts. */
+  pointWon(by: Side): void {
+    const now = performance.now();
+    if (by === "local") {
+      this.venue.crowd.cheer(0.5, now);
+      this.avatar.setMood("sad", 1.1, now);
+    } else {
+      this.avatar.setMood("cheer", 1.2, now);
+    }
+  }
+
+  /** The match ended: big cheer and a dejected opponent, or the opponent celebrating. */
+  matchWon(by: Side): void {
+    const now = performance.now();
+    if (by === "local") {
+      this.venue.crowd.cheer(1, now);
+      this.avatar.setMood("sad", Infinity, now);
+    } else {
+      this.avatar.setMood("cheer", Infinity, now);
+    }
+  }
+
+  resetReactions(): void {
+    this.avatar.resetMood();
+    this.venue.crowd.calm();
   }
 
   resize(width: number, height: number): void {
@@ -193,6 +237,19 @@ export class Scene3D {
   }
 
   render(): void {
+    const now = performance.now();
+    const dt = Math.min(0.1, Math.max(0, (now - this.lastRenderAt) / 1000));
+    this.lastRenderAt = now;
+
+    this.venue.crowd.update(now);
+    this.avatar.group.visible = this.opponentPaddle.visible;
+    if (this.opponentPaddle.visible) {
+      // The hand goes where the paddle's grip is, however the paddle is turned.
+      this.opponentPaddle.updateMatrixWorld();
+      this.gripPoint.set(0, handleY(FACE_HALF_HEIGHT), 0);
+      this.opponentPaddle.localToWorld(this.gripPoint);
+      this.avatar.update(this.gripPoint, this.ball.position, dt, now);
+    }
     this.renderer.render(this.scene, this.camera);
   }
 }

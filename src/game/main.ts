@@ -1,4 +1,5 @@
 import { clear, drawSkeleton, drawVideo, type Surface } from "../core/tracking/overlay2d";
+import { Confetti } from "../core/fx/confetti";
 import { Rolling } from "../core/tracking/stats";
 import { Tracker } from "../core/tracking/tracker";
 import { AIOpponent } from "./ai";
@@ -21,7 +22,7 @@ import {
 import { RTCGamePeer, isPlausibleCode, normalizeCode, type PaddleState } from "./network";
 import type { Paddle, Physics, Side } from "./physics";
 import { Scene3D } from "./scene3d";
-import { playBounce, playHit, playMatchEnd, playPoint, sound } from "./sounds";
+import { playBounce, playCheer, playHit, playMatchEnd, playPoint, sound } from "./sounds";
 import { announceCamera, otherCameraTabs } from "../core/browser/tabGuard";
 
 type Mode = "ai" | "network" | "lab";
@@ -29,7 +30,7 @@ type Mode = "ai" | "network" | "lab";
 if (import.meta.env.DEV) {
   // Dev builds only: lets a test drive the real pipeline with synthetic hands.
   queueMicrotask(() => {
-    (window as unknown as Record<string, unknown>).__portal = { tracker, hand, getGame: () => game };
+    (window as unknown as Record<string, unknown>).__portal = { tracker, hand, getGame: () => game, showMatchEnd };
   });
 }
 
@@ -64,6 +65,10 @@ const serveProgress = el<HTMLDivElement>("serve-progress");
 const pointFlash = el<HTMLDivElement>("point-flash");
 const endScreen = el<HTMLDivElement>("end-screen");
 const endTitle = el<HTMLHeadingElement>("end-title");
+const endCard = el<HTMLDivElement>("end-card");
+const endEyebrow = el<HTMLParagraphElement>("end-eyebrow");
+const endScore = el<HTMLParagraphElement>("end-score");
+const confetti = new Confetti(el<HTMLCanvasElement>("confetti"));
 
 const views = Array.from(document.querySelectorAll<HTMLElement>("[data-view]"));
 function show(name: string): void {
@@ -440,6 +445,8 @@ function enterGame(): void {
   hudButtons.hidden = false;
   document.body.classList.add("playing");
   scene.updateOpponentPaddle(0, 0, null, false);
+  scene.setOpponentStyle(mode === "ai" ? "partner" : "friend");
+  clearCelebration();
 
   game.onEvent = (evt: GameEvent) => {
     if (mode === "network") peer?.send(evt);
@@ -468,6 +475,7 @@ function exitToMenu(): void {
   scene.updateOpponentPaddle(0, 0, null, false);
   curtain.hidden = false;
   endScreen.hidden = true;
+  clearCelebration();
   serveBanner.hidden = true;
   show("landing");
 }
@@ -586,17 +594,47 @@ function handleUi(e: UiEvent, physics: Physics): void {
     playHit(shotPower(physics), e.by === "remote");
   } else if (e.type === "point") {
     playPoint(e.scorer === "local");
+    // The match-winning point gets the big celebration below instead.
+    if (game?.match.phase !== "end") {
+      scene.pointWon(e.scorer);
+      if (e.scorer === "local") playCheer(0.3);
+    }
     pointFlash.className = e.scorer === "local" ? "you show" : "opp show";
     window.clearTimeout(flashTimer);
     flashTimer = window.setTimeout(() => pointFlash.classList.remove("show"), 260);
   } else if (e.type === "match_end") {
-    endTitle.textContent = e.winner === "local" ? "You win" : "Opponent wins";
-    endTitle.className = e.winner === "local" ? "win" : "lose";
-    endScreen.hidden = false;
-    playMatchEnd(e.winner === "local");
+    showMatchEnd(e.winner === "local");
   } else if (e.type === "restart") {
     endScreen.hidden = true;
+    clearCelebration();
   }
+}
+
+/** The end card — and for a win: confetti, the crowd on its feet, a dejected opponent. */
+function showMatchEnd(won: boolean): void {
+  const m = game?.match;
+  endCard.className = won ? "end-card win" : "end-card";
+  endEyebrow.textContent = won ? "Match won" : "Good game";
+  endTitle.textContent = won ? "You win!" : "Opponent wins";
+  endTitle.className = won ? "win" : "lose";
+  endScore.innerHTML = m ? `<b>${m.scoreLocal}</b> – <i>${m.scoreRemote}</i>` : "";
+  endScreen.hidden = false;
+  // Restart the card's pop-in animation each time it's shown.
+  endCard.style.animation = "none";
+  void endCard.offsetWidth;
+  endCard.style.animation = "";
+
+  scene.matchWon(won ? "local" : "remote");
+  playMatchEnd(won);
+  if (won) {
+    confetti.burst();
+    playCheer(1);
+  }
+}
+
+function clearCelebration(): void {
+  confetti.stop();
+  scene.resetReactions();
 }
 
 /** 0..1 from how fast the ball just left the paddle (slowest to fastest planned shot). */
@@ -743,6 +781,7 @@ function sendOurPaddle(paddle: ReturnType<typeof currentLocalPaddle>, now: numbe
 function rematch(): void {
   if (!game) return;
   endScreen.hidden = true;
+  clearCelebration();
   // If the other player already started the rematch, our game has restarted
   // underneath this screen — just get it out of the way.
   if (game.match.phase === "end") game.requestRestart();

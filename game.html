@@ -170,12 +170,12 @@
       #point-flash.opp { background: linear-gradient(to bottom, rgba(228, 112, 92, 0.28), transparent 30%); }
       #point-flash.show { opacity: 1; }
 
+      /* End of match: a card over the court, so the crowd and the opponent's
+         reaction stay visible behind it (no full-screen blur). */
       #end-screen {
         position: absolute;
         inset: 0;
-        background: rgba(7, 10, 16, 0.62);
-        backdrop-filter: blur(6px);
-        -webkit-backdrop-filter: blur(6px);
+        background: radial-gradient(ellipse at center, rgba(7, 10, 16, 0.5) 0%, rgba(7, 10, 16, 0.12) 70%);
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -183,20 +183,79 @@
         pointer-events: auto;
       }
       #end-screen[hidden] { display: none; }
-      #end-screen h2 {
-        font-variation-settings: "wdth" 110, "wght" 760;
-        font-size: clamp(30px, 6vw, 48px);
-        margin: 0 0 10px;
+      #confetti {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
       }
-      #end-screen h2.win { color: var(--ok); }
-      #end-screen h2.lose { color: var(--warn); }
-      #end-screen p {
+      .end-card {
+        position: relative;
+        text-align: center;
+        padding: 22px 30px 18px;
+        min-width: min(320px, 86vw);
+        background: rgba(10, 14, 20, 0.78);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 18px;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+        animation: card-in 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+      }
+      .end-card.win { border-color: rgba(255, 200, 90, 0.45); box-shadow: 0 0 0 1px rgba(255, 200, 90, 0.15), 0 18px 70px rgba(255, 170, 60, 0.25); }
+      .end-trophy { width: 54px; height: 54px; margin: 0 auto 6px; display: none; }
+      .end-card.win .end-trophy { display: block; animation: trophy-pop 0.7s 0.15s cubic-bezier(0.2, 0.9, 0.3, 1.4) both; }
+      .end-eyebrow {
         font-family: "JetBrains Mono", monospace;
-        font-size: 12px;
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
         color: var(--muted);
-        margin: 10px 0 0;
+        margin: 0 0 4px;
       }
-      .end-actions { display: flex; gap: 8px; margin-top: 8px; }
+      #end-screen h2 {
+        font-variation-settings: "wdth" 110, "wght" 780;
+        font-size: clamp(32px, 6.5vw, 52px);
+        line-height: 1.05;
+        margin: 0;
+      }
+      #end-screen h2.win {
+        background: linear-gradient(180deg, #fff3c4 0%, #ffc857 45%, #ff8a3d 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        filter: drop-shadow(0 2px 14px rgba(255, 170, 60, 0.45));
+      }
+      #end-screen h2.lose { color: var(--ink); }
+      .end-score {
+        font-variation-settings: "wdth" 108, "wght" 700;
+        font-size: 22px;
+        color: var(--ink-2);
+        margin: 6px 0 14px;
+        font-variant-numeric: tabular-nums;
+      }
+      .end-score b { color: #ffb47a; font-weight: inherit; }
+      .end-score i { color: #7fd6df; font-style: normal; }
+      #end-screen .end-hint {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11.5px;
+        color: var(--muted);
+        margin: 12px 0 0;
+      }
+      .end-actions { display: flex; gap: 8px; justify-content: center; }
+      @keyframes card-in {
+        from { opacity: 0; transform: translateY(14px) scale(0.92); }
+        to { opacity: 1; transform: none; }
+      }
+      @keyframes trophy-pop {
+        0% { opacity: 0; transform: scale(0.3) rotate(-18deg); }
+        70% { opacity: 1; transform: scale(1.15) rotate(6deg); }
+        100% { transform: scale(1) rotate(0); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .end-card, .end-card.win .end-trophy { animation: none; }
+      }
 
       #debug {
         position: absolute;
@@ -641,12 +700,31 @@
           <div id="debug" hidden></div>
 
           <div id="end-screen" hidden>
-            <h2 id="end-title"></h2>
-            <div class="end-actions">
-              <button type="button" id="end-again">Play again</button>
-              <button type="button" class="ghost" id="end-menu">Menu</button>
+            <canvas id="confetti" aria-hidden="true"></canvas>
+            <div class="end-card" id="end-card">
+              <svg class="end-trophy" viewBox="0 0 64 64" aria-hidden="true">
+                <defs>
+                  <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#fff1b8" />
+                    <stop offset="0.5" stop-color="#ffc857" />
+                    <stop offset="1" stop-color="#e88a2e" />
+                  </linearGradient>
+                </defs>
+                <path d="M18 8h28v12c0 9-6 16-14 16s-14-7-14-16V8z" fill="url(#gold)" />
+                <path d="M18 12H9c0 8 4 13 10 14M46 12h9c0 8-4 13-10 14" fill="none" stroke="#ffc857" stroke-width="4" stroke-linecap="round" />
+                <rect x="28" y="35" width="8" height="10" fill="#e8a23e" />
+                <rect x="20" y="45" width="24" height="7" rx="2" fill="url(#gold)" />
+                <rect x="16" y="52" width="32" height="5" rx="2" fill="#c97a2a" />
+              </svg>
+              <p class="end-eyebrow" id="end-eyebrow">Final score</p>
+              <h2 id="end-title"></h2>
+              <p class="end-score" id="end-score"></p>
+              <div class="end-actions">
+                <button type="button" id="end-again">Play again</button>
+                <button type="button" class="ghost" id="end-menu">Menu</button>
+              </div>
+              <p class="end-hint">or press Enter / Esc</p>
             </div>
-            <p>or press Enter / Esc</p>
           </div>
         </div>
 

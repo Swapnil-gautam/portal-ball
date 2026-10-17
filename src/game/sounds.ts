@@ -38,6 +38,21 @@ export function playPoint(won: boolean): void {
   }
 }
 
+/**
+ * The crowd: a swell of voices (two bands of noise) and scattered claps.
+ * `strength` 0..1 — a point (≈0.3) or the match (1).
+ */
+export function playCheer(strength: number): void {
+  const s = clamp01(strength);
+  const length = 1 + s * 1.6;
+  sound.noise({ duration: length, gain: 0.22 * s, filter: "bandpass", frequency: 850, q: 0.55, attack: 0.25 });
+  sound.noise({ duration: length * 0.85, gain: 0.1 * s, filter: "bandpass", frequency: 2300, q: 0.9, attack: 0.18 });
+  const claps = Math.round(6 + s * 18);
+  for (let i = 0; i < claps; i++) {
+    sound.noise({ duration: 0.03, gain: 0.12 * s * (0.5 + Math.random() * 0.5), filter: "highpass", frequency: 1800, delay: 0.05 + Math.random() * length * 0.8 });
+  }
+}
+
 export function playMatchEnd(won: boolean): void {
   const notes = won ? [523, 659, 784, 1047] : [392, 330, 262];
   notes.forEach((f, i) =>
