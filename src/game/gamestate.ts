@@ -26,6 +26,8 @@ export interface MatchState {
   winScore: number;
 }
 
+/** First to this many points wins the match. */
+export const WIN_SCORE = 3;
 const SERVE_HOLD_MS = 500;
 const STILL_SPEED = 0.8; // world units/s — paddle counts as "held still" below this
 const AI_SERVE_DELAY_MS = 900;
@@ -96,7 +98,7 @@ export class GameState {
   }
 
   startNewMatch(): void {
-    this.match = { phase: "serve", scoreLocal: 0, scoreRemote: 0, serving: this.firstServer, winScore: 7 };
+    this.match = { phase: "serve", scoreLocal: 0, scoreRemote: 0, serving: this.firstServer, winScore: WIN_SCORE };
     this.beginServe(this.firstServer);
   }
 

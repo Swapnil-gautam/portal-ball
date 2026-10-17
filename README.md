@@ -21,7 +21,7 @@ Open the URL it prints, then:
 - **Practice vs AI** — one camera, a bot opponent. Good for testing your swing without needing a second person.
 - **Play a friend, anywhere** — the real mode. One of you clicks **Host** and gets a 5-letter code and an invite link; send either to the other player. They open the link (or type the code) and tap **Join** — that's it. Video and gameplay then run directly between your two browsers, so it works across any distance.
 
-**How to play:** stand 1.5–2.5 m back from your camera, hold a hand up. Hold still inside the highlighted zone for half a second to serve. Swing to hit the ball — swing speed sets power, tilting your palm up/down aims the shot. First to 7 wins; press Enter after a match to go again, Escape to leave. **M** toggles sound; **D** shows tracking and frame-rate numbers.
+**How to play:** stand 1.5–2.5 m back from your camera, hold a hand up. Hold still inside the highlighted zone for half a second to serve. Swing to hit the ball — swing speed sets power, tilting your palm up/down aims the shot. First to 3 wins; press Enter after a match to go again, Escape to leave. **M** toggles sound; **D** shows tracking and frame-rate numbers.
 
 **Developer tools:** open the game with `?dev` (e.g. `game.html?dev`) to show the **Paddle lab** — a ball machine plus sliders for how the paddle follows your hand. It's remembered in that browser until you open `?dev=0`. Lab tuning only applies in dev mode; players always get the built-in settings, so both sides of a match feel the same.
 
